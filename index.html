@@ -147,6 +147,11 @@ const maxD=(a,b)=>a>b?a:b;
 function md(s){return s?s.slice(5).replace('-','/'):'';}
 function monthEnd(offset){const t=today().split('-').map(Number);return new Date(Date.UTC(t[0],t[1]-1+offset+1,0)).toISOString().slice(0,10);}
 
+/* 품목 마스터 필드 (그라첸 품목등록 양식 순서) */
+const PF=[['sku','품목코드'],['name','품목명'],['spec','규격'],['cnName','중국명칭'],['eaCt','EA/CT','n'],['rmb','RMB','n'],['usd','USD','n'],['barcode','바코드'],['supplier','구매처명']];
+const PF_KEYS=PF.map(x=>x[0]).concat(['safety','memo']);
+const COMPANY_TITLE='회사명 : (주)그라첸';
+function numOrBlank(v){if(v===''||v==null)return '';const n=Number(String(v).replace(/,/g,''));return isFinite(n)?n:'';}
 const STAGE={ORDERED:'발주(생산중)',READY:'선적대기',TRANSIT:'운송중',RECEIVED:'입고완료'};
 const STAGE_ORDER={ORDERED:0,READY:1,TRANSIT:2,RECEIVED:3};
 const OSTAT={CONFIRMED:'출고확정',SHIPPED:'출고완료',CANCELLED:'취소'};
@@ -162,7 +167,7 @@ let S=load();
 let savedAt='';
 function save(){if(MODE==='github'){ghSave();return;}try{localStorage.setItem(KEY,JSON.stringify(S));const d=new Date();savedAt=p2(d.getHours())+':'+p2(d.getMinutes());}catch(e){toast('저장 실패: '+e.message);}}
 
-const ui={tab:'dash',dashQ:'',pipeStage:'ACTIVE',pipeQ:'',sel:new Set(),shipAll:false,ordStatus:'CONFIRMED',ordQ:'',ledgerPid:'',atpPid:'',atpDate:'',prodQ:'',xlType:'po',xlPrev:null};
+const ui={tab:'dash',dashQ:'',pipeStage:'ACTIVE',pipeQ:'',sel:new Set(),shipAll:false,ordStatus:'CONFIRMED',ordQ:'',ledgerPid:'',atpPid:'',atpDate:'',prodQ:'',dashAll:false,xlType:'po',xlPrev:null};
 
 function toast(m){gh.lastMsg=m;toastRaw(m);}
 function toastRaw(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),2200);}
@@ -205,14 +210,14 @@ function dcell(x){
 function compute(){
   const T=today(),R={};
   S.products.forEach(p=>R[p.id]={p,ordered:0,ready:0,transit:0,wh:0,alloc:0,inb:[],outb:[]});
-  S.moves.forEach(m=>{const r=R[m.productId];if(r) r.wh+=Number(m.qty)||0;});
+  S.moves.forEach(m=>{const r=R[m.productId];if(r){r.wh+=Number(m.qty)||0;r.touched=true;}});
   S.pipeline.forEach(e=>{
-    const r=R[e.productId]; if(!r||e.stage==='RECEIVED') return;
+    const r=R[e.productId]; if(r) r.touched=true; if(!r||e.stage==='RECEIVED') return;
     r[{ORDERED:'ordered',READY:'ready',TRANSIT:'transit'}[e.stage]]+=Number(e.qty)||0;
     const x=est(e); r.inb.push({date:x.wh,qty:Number(e.qty)||0,e,x});
   });
   S.orders.forEach(o=>{
-    const r=R[o.productId]; if(!r||o.status!=='CONFIRMED') return;
+    const r=R[o.productId]; if(r) r.touched=true; if(!r||o.status!=='CONFIRMED') return;
     r.alloc+=Number(o.qty)||0;
     const late=!!o.shipDate&&o.shipDate<T;
     r.outb.push({date:(o.shipDate&&o.shipDate>=T)?o.shipDate:T,late,qty:Number(o.qty)||0,o});
@@ -227,6 +232,7 @@ function compute(){
     ev.forEach(e=>{bal+=e.d;e.bal=bal;if(bal<r.minBal)r.minBal=bal;if(bal<0&&!r.short)r.short=e.date;});
     r.tl=ev;
     r.low=(Number(r.p.safety)||0)>0&&r.avail<Number(r.p.safety);
+    r.active=!!r.touched||(Number(r.p.safety)||0)>0;
   });
   return R;
 }
@@ -295,16 +301,18 @@ function vDash(R){
     '</table></div></div></div>';
 
   // 품목별 현황
-  const fr=rows.filter(r=>match(ui.dashQ,r.p.sku,r.p.name,r.p.brand));
-  h+='<div class="card"><h2>품목별 재고 흐름</h2><div class="toolbar"><input id="dashQ" placeholder="품목코드·품목명·브랜드 검색" value="'+esc(ui.dashQ)+'" oninput="App.set(\'dashQ\',this.value)" style="width:260px"><span class="sp"></span><button class="btn" onclick="App.exportSummary()">CSV 내보내기</button></div>'+
-  '<div class="tw"><table><tr><th>품목코드</th><th>품목명</th><th>브랜드</th><th class="n">① 발주(생산중)</th><th class="n">② 선적대기</th><th class="n">③ 운송중</th><th class="n">④ 창고</th><th class="n">⑤ 출고확정</th><th class="n">현재 가용</th><th class="n">총 예상가용</th><th>다음 가용 예정</th><th>상태</th></tr>'+
+  const nAct=rows.filter(r=>r.active).length;
+  const fr=rows.filter(r=>(ui.dashQ?true:(ui.dashAll||r.active))&&match(ui.dashQ,r.p.sku,r.p.name,r.p.spec,r.p.cnName,r.p.barcode,r.p.supplier));
+  h+='<div class="card"><h2>품목별 재고 흐름</h2><div class="toolbar"><input id="dashQ" placeholder="품목코드·품목명·규격·바코드 검색" value="'+esc(ui.dashQ)+'" oninput="App.set(\'dashQ\',this.value)" style="width:260px"><label class="mute"><input type="checkbox" '+(ui.dashAll?'checked':'')+' onchange="App.set(\'dashAll\',this.checked)"> 재고·발주·주문 없는 품목도 표시</label><span class="mute">'+(ui.dashQ?'검색 결과 '+fr.length+'개':ui.dashAll?'전체 '+rows.length+'개':'진행 품목 '+nAct+'개 / 전체 '+rows.length+'개')+'</span><span class="sp"></span><button class="btn" onclick="App.exportSummary()">CSV 내보내기</button></div>'+
+  '<div class="tw"><table><tr><th>품목코드</th><th>품목명</th><th>규격</th><th class="n">① 발주(생산중)</th><th class="n">② 선적대기</th><th class="n">③ 운송중</th><th class="n">④ 창고</th><th class="n">⑤ 출고확정</th><th class="n">현재 가용</th><th class="n">총 예상가용</th><th>다음 가용 예정</th><th>상태</th></tr>'+
   fr.map(r=>{
     const st=r.short?'<span class="neg">결품예상 '+md(r.short)+'</span>':r.low?'<span class="low">안전재고 미달</span>':'<span class="pos">정상</span>';
-    return '<tr class="click" onclick="App.goAtp(\''+r.p.id+'\')"><td><b>'+esc(r.p.sku)+'</b></td><td>'+esc(r.p.name)+'</td><td class="mute">'+esc(r.p.brand)+'</td>'+
+    return '<tr class="click" onclick="App.goAtp(\''+r.p.id+'\')"><td><b>'+esc(r.p.sku)+'</b></td><td>'+esc(r.p.name)+'</td><td class="mute">'+esc(r.p.spec)+'</td>'+
     '<td class="n">'+z(r.ordered)+'</td><td class="n">'+z(r.ready)+'</td><td class="n">'+z(r.transit)+'</td><td class="n"><b>'+fmt(r.wh)+'</b></td><td class="n">'+z(r.alloc)+'</td>'+
     '<td class="n '+(r.avail<0?'neg':r.low?'low':'')+'"><b>'+fmt(r.avail)+'</b></td><td class="n '+(r.total<0?'neg':'')+'">'+fmt(r.total)+'</td>'+
     '<td>'+(r.next?dcell(r.next.x.whShow)+' <span class="mute">+'+fmt(r.next.qty)+'</span>':'<span class="mute">-</span>')+'</td><td>'+st+'</td></tr>';
   }).join('')+
+  (fr.length?'':'<tr><td colspan="12" class="empty">'+(ui.dashQ?'검색 결과가 없습니다':'아직 재고·발주·주문이 입력된 품목이 없습니다. 발주를 등록하거나 엑셀 업로드 → 재고실사로 기초재고를 넣으세요.')+'</td></tr>')+
   '<tr class="sum"><td colspan="3">합계</td><td class="n">'+fmt(tot.ordered)+'</td><td class="n">'+fmt(tot.ready)+'</td><td class="n">'+fmt(tot.transit)+'</td><td class="n">'+fmt(tot.wh)+'</td><td class="n">'+fmt(tot.alloc)+'</td><td class="n">'+fmt(tot.avail)+'</td><td class="n">'+fmt(tot.total)+'</td><td colspan="2"></td></tr></table></div>'+
   '<div class="legend"><span>행을 클릭하면 해당 품목의 가용 일정으로 이동</span><span>현재 가용 = 창고 − 출고확정</span><span>총 예상가용 = 발주+선적대기+운송중+창고 − 출고확정</span><span>결품예상 = 출고예정일 기준 잔량이 0 미만이 되는 첫 날</span></div></div>';
   return h;
@@ -381,12 +389,12 @@ function vShip(){
 
 /* ---------- 창고 수불 ---------- */
 function vWh(R){
-  const rows=Object.values(R).sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
+  const rows=Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
   let h='<div class="two"><div class="card"><h2>품목별 창고 재고</h2><div class="tw" style="max-height:60vh"><table><tr><th>품목</th><th class="n">창고재고</th><th class="n">출고확정</th><th class="n">현재 가용</th><th class="n">안전재고</th></tr>'+
     rows.map(r=>'<tr class="click" onclick="App.set(\'ledgerPid\',\''+r.p.id+'\')"><td>'+pn(r.p.id)+'</td><td class="n"><b>'+fmt(r.wh)+'</b></td><td class="n">'+z(r.alloc)+'</td><td class="n '+(r.avail<0?'neg':r.low?'low':'')+'">'+fmt(r.avail)+'</td><td class="n mute">'+z(Number(r.p.safety))+'</td></tr>').join('')+
     '</table></div></div>';
   const ms=S.moves.filter(m=>!ui.ledgerPid||m.productId===ui.ledgerPid).slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0);
-  h+='<div class="card"><h2>수불 내역</h2><div class="toolbar"><select onchange="App.set(\'ledgerPid\',this.value)"><option value="">전체 품목</option>'+sortedProducts().map(p=>'<option value="'+p.id+'" '+(ui.ledgerPid===p.id?'selected':'')+'>'+esc(p.sku+' '+p.name)+'</option>').join('')+'</select><span class="sp"></span><button class="btn" onclick="App.addMove(\'IN\')">+ 수동 입고/기초재고</button><button class="btn" onclick="App.addMove(\'ADJ\')">± 재고 조정</button><button class="btn" onclick="App.goXl(\'stock\')">실사 엑셀 업로드</button></div>'+
+  h+='<div class="card"><h2>수불 내역</h2><div class="toolbar"><select onchange="App.set(\'ledgerPid\',this.value)"><option value="">전체 품목</option>'+sortedProducts().filter(p=>R[p.id]&&R[p.id].active).map(p=>'<option value="'+p.id+'" '+(ui.ledgerPid===p.id?'selected':'')+'>'+esc(p.sku+' '+p.name)+'</option>').join('')+'</select><span class="sp"></span><button class="btn" onclick="App.addMove(\'IN\')">+ 수동 입고/기초재고</button><button class="btn" onclick="App.addMove(\'ADJ\')">± 재고 조정</button><button class="btn" onclick="App.goXl(\'stock\')">실사 엑셀 업로드</button></div>'+
     '<div class="tw" style="max-height:60vh"><table><tr><th>일자</th><th>구분</th><th>품목</th><th class="n">수량</th><th>참조</th><th>메모</th><th></th></tr>'+
     (ms.length?ms.map(m=>'<tr><td>'+m.date+'</td><td><span class="badge '+(m.type==='IN'?'st-RECEIVED':m.type==='OUT'?'st-SHIPPED':'st-READY')+'">'+MTYPE[m.type]+'</span></td><td>'+pn(m.productId)+'</td><td class="n '+(m.qty<0?'neg':'pos')+'">'+(m.qty>0?'+':'')+fmt(m.qty)+'</td><td class="mute">'+esc(m.ref)+'</td><td class="mute">'+esc(m.memo)+'</td><td>'+((m.pipeId||m.orderId)?'<span class="mute" title="발주/주문 화면에서 되돌리기로 취소">연동</span>':'<button class="btn s d" onclick="App.delMove(\''+m.id+'\')">삭제</button>')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">내역 없음</td></tr>')+
     '</table></div></div></div>';
@@ -420,8 +428,9 @@ function vOrd(R){
 /* ---------- 가용 일정 ---------- */
 function vAtp(R){
   const T=today();
-  const rows=Object.values(R).sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
+  const rows=Object.values(R).filter(r=>r.active||r.p.id===ui.atpPid).sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
   if(!ui.atpPid||!R[ui.atpPid]) ui.atpPid=rows[0]?rows[0].p.id:'';
+  if(!rows.length) return '<div class="card empty">재고·발주·주문이 입력된 품목이 없습니다.</div>';
   const cols=[0,1,2,3,4,5].map(i=>monthEnd(i));
   const cd=ui.atpDate||'';
   const cell=(v,r)=>'<td class="n '+(v<0?'neg negbg':(Number(r.p.safety)&&v<Number(r.p.safety))?'low':'')+'">'+fmt(v)+'</td>';
@@ -450,10 +459,10 @@ function vAtp(R){
 
 /* ---------- 품목 ---------- */
 function vProd(R){
-  const list=sortedProducts().filter(p=>match(ui.prodQ,p.sku,p.name,p.brand,p.spec));
-  return '<div class="card"><div class="toolbar"><button class="btn p" onclick="App.editProd()">+ 품목 추가</button><button class="btn" onclick="App.goXl(\'product\')">엑셀 업로드</button><button class="btn" onclick="App.bulkProd2()">엑셀에서 붙여넣기</button><span class="sp"></span><input id="prodQ" placeholder="검색" value="'+esc(ui.prodQ)+'" oninput="App.set(\'prodQ\',this.value)"></div>'+
-  '<div class="tw"><table><tr><th>품목코드</th><th>품목명</th><th>브랜드</th><th>규격/단위</th><th class="n">안전재고</th><th class="n">창고재고</th><th>메모</th><th></th></tr>'+
-  (list.length?list.map(p=>'<tr><td><b>'+esc(p.sku)+'</b></td><td>'+esc(p.name)+'</td><td>'+esc(p.brand)+'</td><td class="mute">'+esc(p.spec)+'</td><td class="n">'+z(Number(p.safety))+'</td><td class="n">'+fmt(R[p.id]?R[p.id].wh:0)+'</td><td class="mute">'+esc(p.memo)+'</td><td><button class="btn s" onclick="App.editProd(\''+p.id+'\')">수정</button> <button class="btn s d" onclick="App.delProd(\''+p.id+'\')">삭제</button></td></tr>').join(''):'<tr><td colspan="8" class="empty">품목이 없습니다</td></tr>')+
+  const list=sortedProducts().filter(p=>match(ui.prodQ,p.sku,p.name,p.spec,p.cnName,p.barcode,p.supplier,p.memo));
+  return '<div class="card"><div class="toolbar"><button class="btn p" onclick="App.editProd()">+ 품목 추가</button><button class="btn" onclick="App.goXl(\'product\')">엑셀 업로드</button><button class="btn" onclick="App.bulkProd2()">엑셀에서 붙여넣기</button><span class="sp"></span><span class="mute">'+(ui.prodQ?'검색 결과 '+list.length+'개 / ':'')+'전체 '+S.products.length+'개</span><input id="prodQ" placeholder="품목코드·품목명·중국명칭·바코드·구매처 검색" style="width:280px" value="'+esc(ui.prodQ)+'" oninput="App.set(\'prodQ\',this.value)"></div>'+
+  '<div class="tw"><table><tr><th>품목코드</th><th>품목명</th><th>규격</th><th>중국명칭</th><th class="n">EA/CT</th><th class="n">RMB</th><th class="n">USD</th><th>바코드</th><th>구매처명</th><th class="n">안전재고</th><th class="n">창고재고</th><th></th></tr>'+
+  (list.length?list.map(p=>'<tr><td><b>'+esc(p.sku)+'</b></td><td>'+esc(p.name)+(p.memo?' <span class="mute" title="'+esc(p.memo)+'">📝</span>':'')+'</td><td class="mute">'+esc(p.spec)+'</td><td class="mute">'+esc(p.cnName)+'</td><td class="n">'+esc(p.eaCt)+'</td><td class="n">'+esc(p.rmb)+'</td><td class="n">'+esc(p.usd)+'</td><td class="mute">'+esc(p.barcode)+'</td><td class="mute">'+esc(p.supplier)+'</td><td class="n">'+z(Number(p.safety))+'</td><td class="n">'+fmt(R[p.id]?R[p.id].wh:0)+'</td><td><button class="btn s" onclick="App.editProd(\''+p.id+'\')">수정</button> <button class="btn s d" onclick="App.delProd(\''+p.id+'\')">삭제</button></td></tr>').join(''):'<tr><td colspan="12" class="empty">품목이 없습니다</td></tr>')+
   '</table></div></div>';
 }
 
@@ -477,15 +486,18 @@ function vSet(){
 /* ================= 폼 도우미 ================= */
 function fld(l,input,full){return '<label class="f'+(full?' full':'')+'"><span>'+l+'</span>'+input+'</label>';}
 function inp(name,val,type,attrs){return '<input name="'+name+'" type="'+(type||'text')+'" value="'+esc(val==null?'':val)+'" '+(attrs||'')+'>';}
-function prodSel(name,val,attrs){return '<select name="'+name+'" required '+(attrs||'')+'><option value="">품목 선택</option>'+sortedProducts().map(p=>'<option value="'+p.id+'" '+(p.id===val?'selected':'')+'>'+esc(p.sku+' '+p.name)+'</option>').join('')+'</select>';}
+function prodSel(name,val){const p=val?P(val):null;return '<input class="psel" list="dlProd" name="'+name+'_t" value="'+esc(p?p.sku+' | '+p.name:'')+'" placeholder="품목코드 또는 품목명 입력 후 선택" required autocomplete="off" oninput="App.psel(this)" onchange="App.psel(this,1)"><input type="hidden" name="'+name+'" value="'+esc(val||'')+'">';}
+function prodDatalist(){return '<datalist id="dlProd">'+sortedProducts().map(p=>'<option value="'+esc(p.sku+' | '+p.name)+'">'+(p.spec?esc(p.spec):'')+'</option>').join('')+'</datalist>';}
+function resolveProd(t){t=String(t||'').trim();if(!t)return null;const sku=t.split(' | ')[0].trim();
+  return S.products.find(p=>p.sku===sku)||S.products.find(p=>p.sku.toLowerCase()===sku.toLowerCase())||(()=>{const m=S.products.filter(p=>p.name===t);return m.length===1?m[0]:null;})();}
 function fv(f,n){const el=f.elements[n];return el?String(el.value).trim():'';}
 function fn(f,n){return Number(fv(f,n))||0;}
 let modalOk=null;
-function openModal(title,body,ok,opt){opt=opt||{};$('#mTitle').textContent=title;$('#mBody').innerHTML=body;$('#mOk').textContent=opt.ok||'저장';$('#mBox').style.maxWidth=opt.wide?'860px':'580px';$('#modal').classList.add('on');modalOk=ok;
+function openModal(title,body,ok,opt){opt=opt||{};$('#mTitle').textContent=title;$('#mBody').innerHTML=body+(body.includes('list="dlProd"')?prodDatalist():'');$('#mOk').textContent=opt.ok||'저장';$('#mBox').style.maxWidth=opt.wide?'860px':'580px';$('#modal').classList.add('on');modalOk=ok;
   setTimeout(()=>{const el=$('#mBody input:not([type=hidden]),#mBody select,#mBody textarea');if(el)el.focus();},30);}
 function closeModal(){$('#modal').classList.remove('on');modalOk=null;}
 function modalSubmit(){if(!modalOk)return;const f=$('#mForm');if(!f.reportValidity())return;const r=modalOk(f);if(r!==false){closeModal();save();render();}}
-function lineRow(pid,qty){return '<div class="line">'+prodSel('lp',pid,'onchange="App.hint(this)"')+'<input name="lq" type="number" min="1" placeholder="수량" value="'+esc(qty||'')+'" required><button type="button" class="btn s d" onclick="this.parentNode.remove()">×</button><div class="hint"></div></div>';}
+function lineRow(pid,qty){return '<div class="line">'+prodSel('lp',pid)+'<input name="lq" type="number" min="1" placeholder="수량" value="'+esc(qty||'')+'" required><button type="button" class="btn s d" onclick="this.parentNode.remove()">×</button><div class="hint"></div></div>';}
 function readLines(f){const out=[];f.querySelectorAll('.line').forEach(l=>{const p=l.querySelector('[name=lp]').value,q=Number(l.querySelector('[name=lq]').value)||0;if(p&&q>0)out.push([p,q]);});return out;}
 function split(arr,item,qty){if(qty>=item.qty)return item;const rest=Object.assign({},item,{id:uid(),qty:item.qty-qty});item.qty=qty;arr.push(rest);return item;}
 
@@ -499,20 +511,27 @@ const App={
   sel(id,on){on?ui.sel.add(id):ui.sel.delete(id);render();},
   selAll(on){document.querySelectorAll('#main table input[type=checkbox][onclick*="App.sel("]').forEach(c=>{const m=c.getAttribute('onclick').match(/App\.sel\('([^']+)'/);if(m)on?ui.sel.add(m[1]):ui.sel.delete(m[1]);});render();},
   clearSel(){ui.sel.clear();render();},
+  psel(el,done){const p=resolveProd(el.value),h=el.nextElementSibling;if(!h)return;h.value=p?p.id:'';if(p&&done)el.value=p.sku+' | '+p.name;
+    el.setCustomValidity(p||!el.value?'':'목록에서 품목을 선택하세요');
+    if(el.closest('.line'))App.hint(h);
+    const f=el.form,sp=f&&f.elements.supplier;if(p&&sp&&!sp.value&&p.supplier)sp.value=p.supplier;},
   hint(sel){const h=sel.parentNode.querySelector('.hint');if(!h)return;const R=compute(),r=R[sel.value];h.innerHTML=r?'창고 '+fmt(r.wh)+' · 출고확정 '+fmt(r.alloc)+' · <b>현재 가용 '+fmt(r.avail)+'</b> · 입고예정 '+fmt(r.pipe)+(r.next?' (다음 '+r.next.date+' +'+fmt(r.next.qty)+')':''):'';},
 
   /* 품목 */
   editProd(id){const p=id?P(id):{};
-    openModal(id?'품목 수정':'품목 추가','<div class="grid2">'+fld('품목코드 *',inp('sku',p.sku,'text','required'))+fld('품목명 *',inp('name',p.name,'text','required'))+fld('브랜드',inp('brand',p.brand,'text','list="brands"'))+fld('규격/단위',inp('spec',p.spec))+fld('안전재고',inp('safety',p.safety||'','number','min="0"'))+fld('메모',inp('memo',p.memo))+'</div><datalist id="brands">'+[...new Set(S.products.map(x=>x.brand).filter(Boolean))].map(b=>'<option value="'+esc(b)+'">').join('')+'</datalist>',
+    openModal(id?'품목 수정':'품목 추가','<div class="grid3">'+fld('품목코드 *',inp('sku',p.sku,'text','required'))+fld('품목명 *',inp('name',p.name,'text','required'))+fld('규격',inp('spec',p.spec))+
+      fld('중국명칭',inp('cnName',p.cnName))+fld('EA/CT (박스당 입수)',inp('eaCt',p.eaCt,'number','min="0" step="any"'))+fld('바코드',inp('barcode',p.barcode))+
+      fld('RMB (단가)',inp('rmb',p.rmb,'number','min="0" step="any"'))+fld('USD (단가)',inp('usd',p.usd,'number','min="0" step="any"'))+fld('구매처명',inp('supplier',p.supplier,'text','list="sups2"'))+
+      fld('안전재고',inp('safety',p.safety||'','number','min="0"'))+fld('메모',inp('memo',p.memo),true)+'</div><datalist id="sups2">'+[...new Set(S.products.map(x=>x.supplier).filter(Boolean))].map(b=>'<option value="'+esc(b)+'">').join('')+'</datalist>',
     f=>{const sku=fv(f,'sku');if(S.products.some(x=>x.sku===sku&&x.id!==id)){alert('이미 있는 품목코드입니다: '+sku);return false;}
-      const o={sku,name:fv(f,'name'),brand:fv(f,'brand'),spec:fv(f,'spec'),safety:fn(f,'safety'),memo:fv(f,'memo')};
+      const o={sku,name:fv(f,'name'),spec:fv(f,'spec'),cnName:fv(f,'cnName'),eaCt:numOrBlank(fv(f,'eaCt')),rmb:numOrBlank(fv(f,'rmb')),usd:numOrBlank(fv(f,'usd')),barcode:fv(f,'barcode'),supplier:fv(f,'supplier'),safety:fn(f,'safety'),memo:fv(f,'memo')};
       if(id)Object.assign(p,o);else S.products.push(Object.assign({id:uid()},o));toast('품목 저장됨');});},
   delProd(id){if(S.pipeline.some(e=>e.productId===id)||S.orders.some(o=>o.productId===id)||S.moves.some(m=>m.productId===id)){alert('발주·주문·수불 내역이 있는 품목은 삭제할 수 없습니다.');return;}
     if(!confirm('품목을 삭제할까요?'))return;toast('품목 삭제');S.products=S.products.filter(p=>p.id!==id);save();render();},
-  bulkProd2(){openModal('품목 일괄 등록','<div class="note" style="margin-top:0">엑셀에서 아래 순서의 열을 복사해 붙여넣으세요 (첫 줄 제목행은 자동 무시).<br><b>품목코드 · 품목명 · 브랜드 · 규격 · 안전재고</b><br>같은 품목코드가 있으면 내용이 갱신됩니다.</div><textarea name="t" rows="12" style="width:100%;font-family:monospace" placeholder="QS-FP28&#9;세라믹 프라이팬 28cm&#9;퀸센스&#9;28cm&#9;200"></textarea>',
+  bulkProd2(){openModal('품목 일괄 등록','<div class="note" style="margin-top:0">엑셀에서 아래 순서의 열을 복사해 붙여넣으세요 (첫 줄 제목행은 자동 무시).<br><b>품목코드 · 품목명 · 규격 · 중국명칭 · EA/CT · RMB · USD · 바코드 · 구매처명</b> (그라첸 품목등록 양식 순서)<br>같은 품목코드가 있으면 내용이 갱신됩니다.</div><textarea name="t" rows="12" style="width:100%;font-family:monospace" placeholder="0584&#9;쿠치니압력솥/3.5리터&#9;3.5리터&#9;&#9;8"></textarea>',
     f=>{let a=0,u=0;fv(f,'t').split(/\r?\n/).forEach(line=>{if(!line.trim())return;const c=line.split(line.includes('\t')?'\t':',').map(x=>x.trim());
-      if(!c[0]||!c[1]||/품목코드|sku/i.test(c[0]))return;const o={sku:c[0],name:c[1],brand:c[2]||'',spec:c[3]||'',safety:Number(String(c[4]||'').replace(/,/g,''))||0};
-      const ex=S.products.find(p=>p.sku===o.sku);if(ex){Object.assign(ex,o);u++;}else{S.products.push(Object.assign({id:uid(),memo:''},o));a++;}});
+      if(!c[0]||!c[1]||/품목코드|sku|회사명/i.test(c[0]))return;const o={};PF.forEach((d,i)=>{o[d[0]]=d[2]==='n'?numOrBlank(c[i]):(c[i]||'');});
+      const ex=S.products.find(p=>p.sku===o.sku);if(ex){Object.assign(ex,o);u++;}else{S.products.push(Object.assign({id:uid(),safety:0,memo:''},o));a++;}});
       toast('추가 '+a+'건, 갱신 '+u+'건');},{wide:true,ok:'등록'});},
 
   /* 발주 */
@@ -603,7 +622,7 @@ const App={
   importJSON(input){const file=input.files[0];if(!file)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);if(!d.products)throw new Error('형식이 올바르지 않습니다');
       if(!confirm('현재 데이터를 백업 파일 내용으로 교체할까요?\n(품목 '+d.products.length+' · 발주 '+(d.pipeline||[]).length+' · 주문 '+(d.orders||[]).length+')'))return;
       const b=blank();S={settings:Object.assign(b.settings,d.settings||{}),products:d.products,pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[]};ui.sel.clear();save();render();toast('복원 완료');}catch(e){alert('불러오기 실패: '+e.message);}};rd.readAsText(file,'utf-8');input.value='';},
-  exportSummary(){const R=compute();download('inventory_summary_'+today()+'.csv',csv([['품목코드','품목명','브랜드','발주(생산중)','선적대기','운송중','창고재고','출고확정','현재가용','총예상가용','다음가용예정일','다음입고수량','결품예상일','안전재고']].concat(Object.values(R).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.brand,r.ordered,r.ready,r.transit,r.wh,r.alloc,r.avail,r.total,r.next?r.next.x.whShow[0]:'',r.next?r.next.qty:'',r.short||'',r.p.safety||'']))));},
+  exportSummary(){const R=compute();download('inventory_summary_'+today()+'.csv',csv([['품목코드','품목명','규격','발주(생산중)','선적대기','운송중','창고재고','출고확정','현재가용','총예상가용','다음가용예정일','다음입고수량','결품예상일','안전재고']].concat(Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.spec,r.ordered,r.ready,r.transit,r.wh,r.alloc,r.avail,r.total,r.next?r.next.x.whShow[0]:'',r.next?r.next.qty:'',r.short||'',r.p.safety||'']))));},
   exportPipe(){download('inventory_pipeline_'+today()+'.csv',csv([['단계','발주번호','공급처','품목코드','품목명','수량','발주일','생산완료예정','생산완료실적','ETD','ETA','B/L','컨테이너','입고(가용)예정','입고일','추정여부','메모']].concat(S.pipeline.map(e=>{const x=est(e),p=P(e.productId)||{};return [STAGE[e.stage],e.poNo,e.supplier,p.sku,p.name,e.qty,e.orderDate,e.prodDue,e.prodDone,x.etd[0],x.eta[0],e.blNo,e.container,x.whShow[0],e.receivedDate,x.whShow[1]==='c'?'자동추정':'',e.memo];}))));},
   exportOrders(){download('inventory_orders_'+today()+'.csv',csv([['주문번호','거래처','품목코드','품목명','수량','주문일','출고예정일','상태','출고일','메모']].concat(S.orders.map(o=>{const p=P(o.productId)||{};return [o.orderNo,o.customer,p.sku,p.name,o.qty,o.orderDate,o.shipDate,OSTAT[o.status],o.shippedDate,o.memo];}))));},
   exportLedger(){download('inventory_ledger_'+today()+'.csv',csv([['일자','구분','품목코드','품목명','수량','참조','메모']].concat(S.moves.slice().sort((a,b)=>a.date<b.date?-1:1).map(m=>{const p=P(m.productId)||{};return [m.date,MTYPE[m.type],p.sku,p.name,m.qty,m.ref,m.memo];}))));},
@@ -645,10 +664,11 @@ function sample(){
 
 /* ================= 엑셀 업로드 ================= */
 const XL={
-  product:{label:'품목',desc:'품목 마스터를 등록하거나 같은 품목코드는 내용을 갱신합니다.',
-    cols:[['sku','품목코드',1],['name','품목명',1],['brand','브랜드'],['spec','규격'],['safety','안전재고','n'],['memo','메모']],
-    example:[['QS-FP28','세라믹 프라이팬 28cm','퀸센스','28cm',200,'']],
-    prefill:st=>st.products.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).map(p=>[p.sku,p.name,p.brand,p.spec,p.safety||'',p.memo||''])},
+  product:{label:'품목',desc:'그라첸 품목등록 양식(품목코드·품목명·규격·중국명칭·EA/CT·RMB·USD·바코드·구매처명)으로 품목을 등록합니다. 같은 품목코드는 내용을 갱신하고, 바뀐 것이 없으면 건너뜁니다. 안전재고·메모 열을 추가하면 함께 반영됩니다.',
+    cols:PF.map((d,i)=>[d[0],d[1],i<2?1:(d[2]||undefined)]).concat([['safety','안전재고','n'],['memo','메모']]),
+    tplCols:PF.length,title:COMPANY_TITLE,plainHdr:true,textCols:['sku','barcode'],
+    example:[['0584','쿠치니압력솥/3.5리터','3.5리터','',8,'','','','']],
+    prefill:st=>st.products.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).map(p=>PF.map(d=>p[d[0]]==null?'':p[d[0]]))},
   po:{label:'발주 등록',desc:'중국 발주 내역을 ① 발주(생산중) 단계로 등록합니다. 품목명을 적으면 없는 품목코드는 자동 등록됩니다.',
     cols:[['poNo','발주번호',1],['supplier','공급처'],['sku','품목코드',1],['name','품목명'],['qty','수량',1],['orderDate','발주일','d'],['prodDue','생산완료예정일','d'],['etd','선적예정일(ETD)','d'],['memo','메모']],
     example:[['PO-2610-01','Jiangxi Jingshang','QS-FP28','세라믹 프라이팬 28cm',1000,'2026-10-01','2026-11-10','2026-11-15','']]},
@@ -671,7 +691,7 @@ const XL={
     cols:[['sku','품목코드',1],['name','품목명(참고)'],['qty','실사수량',1],['date','기준일','d'],['memo','메모']],
     prefill:st=>{const w={};st.moves.forEach(m=>w[m.productId]=(w[m.productId]||0)+Number(m.qty));return st.products.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).map(p=>[p.sku,p.name,w[p.id]||0,'','']);}}
 };
-const XL_ALIAS={sku:['품번','상품코드','제품코드','코드','sku','itemcode'],name:['상품명','제품명','품명','품목명'],qty:['수량','qty','실사수량','입고수량','출고수량','발주수량','선적수량'],
+const XL_ALIAS={cnName:['중국명','중문명','중문품명','중국품명'],eaCt:['eact','입수','박스입수','ctn입수','ea/ctn'],rmb:['rmb','cny','위안','단가rmb'],usd:['usd','달러','단가usd'],barcode:['바코드','barcode','ean'],supplier:['공급처','구매처','구매처명','공급업체'],safety:['안전재고'],sku:['품번','상품코드','제품코드','코드','sku','itemcode'],name:['상품명','제품명','품명','품목명'],qty:['수량','qty','실사수량','입고수량','출고수량','발주수량','선적수량'],
   poNo:['발주번호','po','pono','po번호','발주no'],blNo:['bl','blno','bl번호','b/l'],customer:['거래처','고객','고객사','판매처'],orderNo:['주문번호','주문no','order'],
   etd:['etd','선적일','선적예정일'],eta:['eta','도착예정일','도착일'],date:['일자','날짜']};
 function pOf(st,id){return st.products.find(p=>p.id===id)||{sku:'',name:''};}
@@ -693,24 +713,27 @@ function consume(arr,cands,qty,cb){
   const have=cands.reduce((s,e)=>s+Number(e.qty),0);if(have<qty)return have;
   let left=qty;for(const e of cands){if(left<=0)break;const t=Math.min(left,Number(e.qty));const x=split(arr,e,t);cb(x);left-=t;}return -1;
 }
+function k_has(o,k){return Object.prototype.hasOwnProperty.call(o,k);}
 function xlApply(type,st,r){
   const T=today();
   let p=r.sku?st.products.find(x=>x.sku===r.sku):null;
   const label=r.sku+(p?' '+p.name:(r.name?' '+r.name:''));
   if(type==='product'){
-    const o={sku:r.sku,name:r.name,brand:r.brand||'',spec:r.spec||'',safety:r.safety||0,memo:r.memo||''};
-    if(p){Object.assign(p,o);return {desc:label,msg:'기존 품목 갱신'};}
-    st.products.push(Object.assign({id:uid()},o));return {desc:label,msg:'신규 등록'};
+    const o={};PF_KEYS.forEach(k=>{if(r._has.includes(k))o[k]=(r[k]==null?'':r[k]);});o.sku=r.sku;o.name=r.name;
+    if(k_has(o,'safety'))o.safety=Number(o.safety)||0;
+    if(p){const ch=Object.keys(o).filter(k=>String(p[k]==null?'':p[k])!==String(o[k]));if(!ch.length)return {desc:r.sku+' '+r.name,msg:'변동 없음',skip:true};
+      Object.assign(p,o);return {desc:r.sku+' '+r.name,msg:'갱신: '+ch.map(k=>(PF.find(d=>d[0]===k)||[0,k==='safety'?'안전재고':'메모'])[1]).join(', ')};}
+    st.products.push(Object.assign({id:uid(),safety:0,memo:''},o));return {desc:r.sku+' '+r.name,msg:'신규 등록'};
   }
   let note='';
   if(!p){
-    if(type==='po'&&r.name){p={id:uid(),sku:r.sku,name:r.name,brand:'',spec:'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
+    if(type==='po'&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:'',cnName:'',eaCt:'',rmb:'',usd:'',barcode:'',supplier:r.supplier||'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
     else return {err:'등록되지 않은 품목코드: '+r.sku+(type==='po'?' (품목명을 적으면 자동 등록)':''),desc:label};
   }
   const q=r.qty;
   if(type==='po'){
     if(st.pipeline.some(e=>e.poNo===r.poNo&&e.productId===p.id))return {err:'이미 등록된 발주번호+품목 (중복 업로드?)',desc:label};
-    st.pipeline.push({id:uid(),productId:p.id,qty:q,stage:'ORDERED',poNo:r.poNo,supplier:r.supplier||'',orderDate:r.orderDate||T,prodDue:r.prodDue||'',prodDone:'',etd:r.etd||'',eta:'',blNo:'',container:'',whDue:'',receivedDate:'',memo:r.memo||''});
+    st.pipeline.push({id:uid(),productId:p.id,qty:q,stage:'ORDERED',poNo:r.poNo,supplier:r.supplier||p.supplier||'',orderDate:r.orderDate||T,prodDue:r.prodDue||'',prodDone:'',etd:r.etd||'',eta:'',blNo:'',container:'',whDue:'',receivedDate:'',memo:r.memo||''});
     return {desc:r.poNo+' · '+label+' · '+fmt(q),msg:'발주 등록'+note};
   }
   const byOrder=(a,b)=>(a.orderDate||'').localeCompare(b.orderDate||'');
@@ -751,7 +774,7 @@ function xlApply(type,st,r){
 function xlParse(type,aoa){
   const def=XL[type],req=def.cols.filter(c=>c[2]===1||c[3]===1);
   let hi=-1,map={};
-  for(let i=0;i<Math.min(aoa.length,15)&&hi<0;i++){
+  for(let i=0;i<Math.min(aoa.length,15)&&hi<0;i++){if(!aoa[i])continue;
     const row=aoa[i].map(nrm),m={};
     def.cols.forEach((c,ci)=>{const names=[nrm(c[1]),nrm(c[1].replace(/\(.*\)/,'')),...(XL_ALIAS[c[0]]||[]).map(nrm)];
       const idx=row.findIndex(h=>h&&names.includes(h));if(idx>=0&&!Object.values(m).includes(idx))m[c[0]]=idx;});
@@ -761,13 +784,15 @@ function xlParse(type,aoa){
   const rows=[];
   for(let i=hi+1;i<aoa.length;i++){
     const a=aoa[i];if(!a||a.every(v=>v===''||v==null))continue;
-    const r={},errs=[];
+    const r={_has:Object.keys(map)},errs=[];
     def.cols.forEach(c=>{const k=c[0],raw=map[k]!=null?a[map[k]]:'';
       if(c[2]==='d'){const d=pDate(raw);if(d===null)errs.push(c[1]+' 날짜 형식 오류('+raw+')');r[k]=d||'';}
-      else if(k==='qty'||c[2]==='n'){const n=pNum(raw);if(Number.isNaN(n))errs.push(c[1]+' 숫자 오류');r[k]=n;}
+      else if(k==='qty'||c[2]==='n'){const n=pNum(raw);if(Number.isNaN(n))errs.push(c[1]+' 숫자 오류('+raw+')');r[k]=(n==null&&k!=='qty')?'':n;}
       else r[k]=String(raw==null?'':raw).trim();
       if((c[2]===1||c[3]===1)&&(r[k]===''||r[k]==null))errs.push(c[1]+' 누락');});
     if(!r.sku&&errs.length===req.length)continue;
+    const filled=Object.keys(map).filter(k=>{const v=a[map[k]];return v!==''&&v!=null;}).length;
+    if(errs.length&&filled<=1)continue; // 출력일시·비고 같은 꼬리 행은 무시
     if(type!=='stock'&&type!=='product'&&r.qty!=null&&!(r.qty>0))errs.push('수량은 0보다 커야 함');
     if(type==='stock'&&r.qty!=null&&r.qty<0)errs.push('실사수량 음수');
     rows.push({rowNo:i+1,r,errs});
@@ -787,27 +812,30 @@ function xlPreview(type,aoa,fileName){
 }
 function xlTemplate(type){
   if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
-  const def=XL[type],hdr=def.cols.map(c=>c[1]+((c[2]===1||c[3]===1)?' *':''));
+  const def=XL[type],tc=def.cols.slice(0,def.tplCols||def.cols.length),hdr=tc.map(c=>c[1]+(!def.plainHdr&&(c[2]===1||c[3]===1)?' *':''));
   const body=def.prefill?def.prefill(S):[];
-  const data=[hdr].concat(body.length?body:(def.example||[]));
+  const top=def.title?[[def.title]]:[];
+  const data=top.concat([hdr]).concat(body.length?body:(def.example||[]));
   const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=def.cols.map(c=>({wch:Math.max(12,c[1].length*2+4)}));
-  XLSX.utils.book_append_sheet(wb,ws,def.label.replace(/[^가-힣A-Za-z0-9]/g,'').slice(0,28)||'data');
-  const guide=[['작성 방법 — '+def.label],[def.desc],[''],['* 표시 열은 필수입니다. 열 순서는 바뀌어도 되지만 제목행 이름은 유지하세요.'],['날짜는 2026-10-01 / 2026.10.01 / 20261001 형식 또는 엑셀 날짜 모두 가능합니다.'],
-    [body.length?'현재 프로그램의 해당 단계 내역이 미리 채워져 있습니다. 처리할 행만 남기고, 수량이 일부면 수량을 줄이세요(나머지는 현 단계에 남음).':'두 번째 줄은 예시입니다. 지우고 입력하세요.'],
+  ws['!cols']=tc.map(c=>({wch:c[0]==='name'?34:c[0]==='cnName'?26:c[0]==='barcode'?16:c[0]==='supplier'?20:Math.max(10,c[1].length*2+4)}));
+  if(def.textCols){const r0=top.length+1;for(let ri=r0;ri<data.length;ri++)def.textCols.forEach(k=>{const ci=tc.findIndex(c=>c[0]===k);if(ci<0)return;const a=XLSX.utils.encode_cell({r:ri,c:ci});const v=data[ri][ci];if(v!==''&&v!=null)ws[a]={t:'s',v:String(v),z:'@'};});}
+  XLSX.utils.book_append_sheet(wb,ws,type==='product'?'품목등록':(def.label.replace(/[^가-힣A-Za-z0-9]/g,'').slice(0,28)||'data'));
+  const guide=[['작성 방법 — '+def.label],[def.desc],[''],[def.plainHdr?'품목코드·품목명은 필수입니다. 첫 줄 회사명 행은 있어도 되고 없어도 됩니다. 열 순서는 바뀌어도 되지만 제목행 이름은 유지하세요.':'* 표시 열은 필수입니다. 열 순서는 바뀌어도 되지만 제목행 이름은 유지하세요.'],['날짜는 2026-10-01 / 2026.10.01 / 20261001 형식 또는 엑셀 날짜 모두 가능합니다.'],
+    [type==='product'?(body.length?'현재 등록된 품목 전체가 채워져 있습니다. 수정·추가 후 그대로 올리면 바뀐 품목만 갱신됩니다. 품목코드는 텍스트로 입력하세요(0584처럼 앞자리 0 유지).':'예시 줄을 지우고 입력하세요. 품목코드는 텍스트로 입력하세요(0584처럼 앞자리 0 유지).'):body.length?'현재 프로그램의 해당 단계 내역이 미리 채워져 있습니다. 처리할 행만 남기고, 수량이 일부면 수량을 줄이세요(나머지는 현 단계에 남음).':'두 번째 줄은 예시입니다. 지우고 입력하세요.'],
     ['발주번호/B/L번호를 적으면 해당 건에서만 처리하고, 비워두면 같은 품목의 가장 오래된 건부터 처리합니다.'],[''],['열 설명']].concat(def.cols.map(c=>[c[1]+((c[2]===1||c[3]===1)?' (필수)':'')+(c[2]==='d'?' — 날짜':'')]));
   const wg=XLSX.utils.aoa_to_sheet(guide);wg['!cols']=[{wch:100}];XLSX.utils.book_append_sheet(wb,wg,'작성방법');
-  const pl=[['품목코드','품목명','브랜드','규격']].concat(sortedProducts().map(p=>[p.sku,p.name,p.brand,p.spec]));
-  const wp=XLSX.utils.aoa_to_sheet(pl);wp['!cols']=[{wch:16},{wch:30},{wch:12},{wch:12}];XLSX.utils.book_append_sheet(wb,wp,'품목코드목록');
+  if(type!=='product'){const pl=[['품목코드','품목명','규격','EA/CT','구매처명']].concat(sortedProducts().map(p=>[p.sku,p.name,p.spec,p.eaCt,p.supplier]));
+  const wp=XLSX.utils.aoa_to_sheet(pl);wp['!cols']=[{wch:16},{wch:34},{wch:12},{wch:8},{wch:20}];XLSX.utils.book_append_sheet(wb,wp,'품목코드목록');}
   XLSX.writeFile(wb,'grachen_template_'+type+'_'+today().replace(/-/g,'')+'.xlsx');
 }
 function xlExportAll(){
   if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
   const R=compute(),wb=XLSX.utils.book_new();
-  const add=(name,aoa)=>{const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=aoa[0].map(()=>({wch:14}));XLSX.utils.book_append_sheet(wb,ws,name);};
-  add('품목별현황',[['품목코드','품목명','브랜드','발주(생산중)','선적대기','운송중','창고재고','출고확정','현재가용','총예상가용','다음가용예정일','다음입고수량','결품예상일','안전재고']].concat(Object.values(R).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.brand,r.ordered,r.ready,r.transit,r.wh,r.alloc,r.avail,r.total,r.next?r.next.x.whShow[0]:'',r.next?r.next.qty:'',r.short||'',r.p.safety||''])));
+  const add=(name,aoa)=>{const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=aoa[aoa.length>1?1:0].map(()=>({wch:14}));XLSX.utils.book_append_sheet(wb,ws,name);};
+  add('품목등록',[[COMPANY_TITLE],PF.map(d=>d[1]).concat(['안전재고','메모'])].concat(sortedProducts().map(p=>PF.map(d=>p[d[0]]==null?'':p[d[0]]).concat([p.safety||'',p.memo||'']))));
+  add('품목별현황',[['품목코드','품목명','규격','발주(생산중)','선적대기','운송중','창고재고','출고확정','현재가용','총예상가용','다음가용예정일','다음입고수량','결품예상일','안전재고']].concat(Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.spec,r.ordered,r.ready,r.transit,r.wh,r.alloc,r.avail,r.total,r.next?r.next.x.whShow[0]:'',r.next?r.next.qty:'',r.short||'',r.p.safety||''])));
   const cols=[0,1,2,3,4,5].map(i=>monthEnd(i));
-  add('월별예상가용',[['품목코드','품목명','현재가용'].concat(cols.map(c=>c.slice(0,7)+' 말'))].concat(Object.values(R).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.avail].concat(cols.map(c=>availAt(r,c))))));
+  add('월별예상가용',[['품목코드','품목명','현재가용'].concat(cols.map(c=>c.slice(0,7)+' 말'))].concat(Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.avail].concat(cols.map(c=>availAt(r,c))))));
   add('발주선적',[['단계','발주번호','공급처','품목코드','품목명','수량','발주일','생산완료예정','생산완료실적','ETD','ETA','B/L','컨테이너','입고(가용)예정','입고일','메모']].concat(S.pipeline.map(e=>{const x=est(e),p=P(e.productId)||{};return [STAGE[e.stage],e.poNo,e.supplier,p.sku,p.name,e.qty,e.orderDate,e.prodDue,e.prodDone,x.etd[0],x.eta[0],e.blNo,e.container,x.whShow[0],e.receivedDate,e.memo];})));
   add('주문',[['주문번호','거래처','품목코드','품목명','수량','주문일','출고예정일','상태','출고일','메모']].concat(S.orders.map(o=>{const p=P(o.productId)||{};return [o.orderNo,o.customer,p.sku,p.name,o.qty,o.orderDate,o.shipDate,OSTAT[o.status],o.shippedDate,o.memo];})));
   add('수불',[['일자','구분','품목코드','품목명','수량','참조','메모']].concat(S.moves.slice().sort((a,b)=>a.date<b.date?-1:1).map(m=>{const p=P(m.productId)||{};return [m.date,MTYPE[m.type],p.sku,p.name,m.qty,m.ref,m.memo];})));
@@ -827,8 +855,8 @@ function vXl(){
       h+='<div class="card"><h2>미리보기 · '+esc(pv.fileName)+' <span class="sub">'+pv.rows.length+'행 — 반영 '+n+' · 오류 '+c.err+(c.skip?' · 변동없음 '+c.skip:'')+(c.warn?' · 주의 '+c.warn:'')+'</span></h2>'+
       '<div class="toolbar"><button class="btn p" '+(n?'':'disabled')+' onclick="App.xlCommit()">'+n+'건 반영하기</button><button class="btn" onclick="App.xlCancel()">취소</button>'+(c.err?'<span class="late">오류 행은 제외하고 반영됩니다. 전부 반영하려면 엑셀을 고친 뒤 다시 올리세요.</span>':'')+'</div>'+
       '<div class="tw" style="max-height:55vh"><table><tr><th class="n">엑셀 행</th><th>결과</th><th>내용</th><th>메시지</th></tr>'+
-      pv.rows.slice(0,1000).map(r=>'<tr'+(r.status==='err'?' class="negbg"':'')+'><td class="n">'+r.rowNo+'</td><td>'+({ok:'<span class="pos">✓ 반영</span>',warn:'<span class="low">✓ 반영(주의)</span>',err:'<span class="neg">✗ 오류</span>',skip:'<span class="mute">– 건너뜀</span>'}[r.status])+'</td><td>'+esc(r.desc)+'</td><td class="'+(r.status==='err'?'neg':r.status==='warn'?'low':'mute')+'">'+esc(r.msg)+'</td></tr>').join('')+
-      (pv.rows.length?'':'<tr><td colspan="4" class="empty">데이터 행이 없습니다</td></tr>')+'</table></div></div>';
+      pv.rows.slice().sort((a,b)=>({err:0,warn:1,ok:2,skip:3}[a.status])-({err:0,warn:1,ok:2,skip:3}[b.status])||a.rowNo-b.rowNo).slice(0,1000).map(r=>'<tr'+(r.status==='err'?' class="negbg"':'')+'><td class="n">'+r.rowNo+'</td><td>'+({ok:'<span class="pos">✓ 반영</span>',warn:'<span class="low">✓ 반영(주의)</span>',err:'<span class="neg">✗ 오류</span>',skip:'<span class="mute">– 건너뜀</span>'}[r.status])+'</td><td>'+esc(r.desc)+'</td><td class="'+(r.status==='err'?'neg':r.status==='warn'?'low':'mute')+'">'+esc(r.msg)+'</td></tr>').join('')+
+      (pv.rows.length>1000?'<tr><td colspan="4" class="mute">… 외 '+(pv.rows.length-1000)+'행 (오류·주의 행은 위에 모두 표시됨)</td></tr>':'')+(pv.rows.length?'':'<tr><td colspan="4" class="empty">데이터 행이 없습니다</td></tr>')+'</table></div></div>';
     }
   }
   return h;
