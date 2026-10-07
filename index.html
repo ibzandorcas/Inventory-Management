@@ -70,6 +70,7 @@ label.f input,label.f select,label.f textarea{font-weight:400}
 .alerts li{margin:3px 0}
 .alerts{margin:0;padding-left:18px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.two>*{min-width:0}
 @media(max-width:1100px){.two{grid-template-columns:1fr}}
 #modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:50px 14px;overflow:auto}
 #modal.on{display:flex}
@@ -158,10 +159,10 @@ const STAGE_ORDER={ORDERED:0,READY:1,TRANSIT:2,RECEIVED:3};
 const OSTAT={CONFIRMED:'출고확정',SHIPPED:'출고완료',CANCELLED:'취소'};
 const MTYPE={IN:'입고',OUT:'출고',ADJ:'조정'};
 
-function blank(){return {settings:{prodDays:45,prodToEtd:7,transit:5,customs:3},products:[],pipeline:[],moves:[],orders:[]};}
+function blank(){return {settings:{prodDays:45,prodToEtd:7,transit:5,customs:3},products:[],pipeline:[],moves:[],orders:[],whSnap:null};}
 function load(){
   try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);const b=blank();
-    return {settings:Object.assign(b.settings,d.settings||{}),products:d.products||[],pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[]};}}catch(e){}
+    return {settings:Object.assign(b.settings,d.settings||{}),products:d.products||[],pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[],whSnap:d.whSnap||null};}}catch(e){}
   return blank();
 }
 let S=load();
@@ -353,7 +354,7 @@ function vDash(R){
     '<td>'+(r.next?dcell(r.next.x.whShow)+' <span class="mute">+'+fmt(r.next.qty)+'</span>':'<span class="mute">-</span>')+'</td><td>'+st+'</td></tr>';
   }).join('')+
   (fr.length>1500?'<tr><td colspan="13" class="mute">… 외 '+(fr.length-1500)+'개 — 검색으로 범위를 좁혀주세요</td></tr>':'')+
-  (fr.length?'':'<tr><td colspan="13" class="empty">'+(q?'검색 결과가 없습니다':mode==='pick'?'선택 목록이 비어 있습니다. 위 검색창에서 품목코드나 품목명으로 찾아 체크한 뒤 “선택 목록에 추가”를 누르세요.':'아직 재고·발주·주문이 입력된 품목이 없습니다. 발주를 등록하거나 엑셀 업로드 → 재고실사로 기초재고를 넣으세요.')+'</td></tr>')+
+  (fr.length?'':'<tr><td colspan="13" class="empty">'+(q?'검색 결과가 없습니다':mode==='pick'?'선택 목록이 비어 있습니다. 위 검색창에서 품목코드나 품목명으로 찾아 체크한 뒤 “선택 목록에 추가”를 누르세요.':'아직 재고·발주·주문이 입력된 품목이 없습니다. 발주를 등록하거나 엑셀 업로드 → 창고 재고(ERP 재고현황)로 현재 재고를 넣으세요.')+'</td></tr>')+
   '<tr class="sum"><td colspan="4">합계 (표시된 '+fr.length+'개)</td><td class="n">'+fmt(ft.ordered)+'</td><td class="n">'+fmt(ft.ready)+'</td><td class="n">'+fmt(ft.transit)+'</td><td class="n">'+fmt(ft.wh)+'</td><td class="n">'+fmt(ft.alloc)+'</td><td class="n">'+fmt(ft.avail)+'</td><td class="n">'+fmt(ft.total)+'</td><td colspan="2"></td></tr></table></div>'+
   '<div class="legend"><span>행을 클릭하면 해당 품목의 가용 일정으로 이동</span><span>★ 선택 목록은 이 브라우저에 저장되는 나만의 보기 목록입니다 (데이터는 바뀌지 않음)</span><span>현재 가용 = 창고 − 출고확정</span><span>총 예상가용 = 발주+선적대기+운송중+창고 − 출고확정</span></div></div>';
   return h;
@@ -432,11 +433,12 @@ function vShip(){
 /* ---------- 창고 수불 ---------- */
 function vWh(R){
   const rows=Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
-  let h='<div class="two"><div class="card"><h2>품목별 창고 재고</h2><div class="tw" style="max-height:60vh"><table><tr><th>품목</th><th class="n">창고재고</th><th class="n">출고확정</th><th class="n">현재 가용</th><th class="n">안전재고</th></tr>'+
-    rows.map(r=>'<tr class="click" onclick="App.set(\'ledgerPid\',\''+r.p.id+'\')"><td>'+pn(r.p.id)+'</td><td class="n"><b>'+fmt(r.wh)+'</b></td><td class="n">'+z(r.alloc)+'</td><td class="n '+(r.avail<0?'neg':r.low?'low':'')+'">'+fmt(r.avail)+'</td><td class="n mute">'+z(Number(r.p.safety))+'</td></tr>').join('')+
+  const sd=S.whSnap&&S.whSnap.date?S.whSnap.date:'';
+  let h='<div class="two" style="grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)"><div class="card"><h2>품목별 창고 재고'+(sd?' <span class="sub">ERP 재고현황 '+esc(sd)+' 기준 반영</span>':'')+'</h2><div class="toolbar"><button class="btn" onclick="App.goXl(\'stock\')">ERP 재고현황 엑셀 업로드</button></div><div class="tw" style="max-height:60vh"><table><tr><th>품목</th><th class="n" title="실재고 − 미판매">가용재고</th><th class="n" title="출고확정(아직 출고 안 됨)">미판매</th><th class="n" title="발주·생산·선적·운송 중 (아직 입고 안 됨)">미입고</th><th class="n">실재고 수량</th></tr>'+
+    rows.map(r=>'<tr class="click" onclick="App.set(\'ledgerPid\',\''+r.p.id+'\')"><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="'+esc(pnText(r.p.id))+'">'+pn(r.p.id)+'</td><td class="n '+(r.avail<0?'neg':r.low?'low':'')+'"><b>'+fmt(r.avail)+'</b></td><td class="n">'+z(r.alloc)+'</td><td class="n">'+z(r.pipe)+'</td><td class="n'+(r.wh<0?' neg':'')+'"><b>'+fmt(r.wh)+'</b></td></tr>').join('')+
     '</table></div></div>';
   const ms=S.moves.filter(m=>!ui.ledgerPid||m.productId===ui.ledgerPid).slice().sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0);
-  h+='<div class="card"><h2>수불 내역</h2><div class="toolbar"><select onchange="App.set(\'ledgerPid\',this.value)"><option value="">전체 품목</option>'+sortedProducts().filter(p=>R[p.id]&&R[p.id].active).map(p=>'<option value="'+p.id+'" '+(ui.ledgerPid===p.id?'selected':'')+'>'+esc(p.sku+' '+p.name)+'</option>').join('')+'</select><span class="sp"></span><button class="btn" onclick="App.addMove(\'IN\')">+ 수동 입고/기초재고</button><button class="btn" onclick="App.addMove(\'ADJ\')">± 재고 조정</button><button class="btn" onclick="App.goXl(\'stock\')">실사 엑셀 업로드</button></div>'+
+  h+='<div class="card"><h2>수불 내역</h2><div class="toolbar"><select onchange="App.set(\'ledgerPid\',this.value)"><option value="">전체 품목</option>'+sortedProducts().filter(p=>R[p.id]&&R[p.id].active).map(p=>'<option value="'+p.id+'" '+(ui.ledgerPid===p.id?'selected':'')+'>'+esc(p.sku+' '+p.name)+'</option>').join('')+'</select><span class="sp"></span><button class="btn" onclick="App.addMove(\'IN\')">+ 수동 입고/기초재고</button><button class="btn" onclick="App.addMove(\'ADJ\')">± 재고 조정</button></div>'+
     '<div class="tw" style="max-height:60vh"><table><tr><th>일자</th><th>구분</th><th>품목</th><th class="n">수량</th><th>참조</th><th>메모</th><th></th></tr>'+
     (ms.length?ms.map(m=>'<tr><td>'+m.date+'</td><td><span class="badge '+(m.type==='IN'?'st-RECEIVED':m.type==='OUT'?'st-SHIPPED':'st-READY')+'">'+MTYPE[m.type]+'</span></td><td>'+pn(m.productId)+'</td><td class="n '+(m.qty<0?'neg':'pos')+'">'+(m.qty>0?'+':'')+fmt(m.qty)+'</td><td class="mute">'+esc(m.ref)+'</td><td class="mute">'+esc(m.memo)+'</td><td>'+((m.pipeId||m.orderId)?'<span class="mute" title="발주/주문 화면에서 되돌리기로 취소">연동</span>':'<button class="btn s d" onclick="App.delMove(\''+m.id+'\')">삭제</button>')+'</td></tr>').join(''):'<tr><td colspan="7" class="empty">내역 없음</td></tr>')+
     '</table></div></div></div>';
@@ -674,7 +676,7 @@ const App={
   exportJSON(){download('grachen_inventory_backup_'+today().replace(/-/g,'')+'.json',JSON.stringify(S,null,1),'application/json');},
   importJSON(input){const file=input.files[0];if(!file)return;const rd=new FileReader();rd.onload=()=>{try{const d=JSON.parse(rd.result);if(!d.products)throw new Error('형식이 올바르지 않습니다');
       if(!confirm('현재 데이터를 백업 파일 내용으로 교체할까요?\n(품목 '+d.products.length+' · 발주 '+(d.pipeline||[]).length+' · 주문 '+(d.orders||[]).length+')'))return;
-      const b=blank();S={settings:Object.assign(b.settings,d.settings||{}),products:d.products,pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[]};ui.sel.clear();save();render();toast('복원 완료');}catch(e){alert('불러오기 실패: '+e.message);}};rd.readAsText(file,'utf-8');input.value='';},
+      const b=blank();S={settings:Object.assign(b.settings,d.settings||{}),products:d.products,pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[],whSnap:d.whSnap||null};ui.sel.clear();save();render();toast('복원 완료');}catch(e){alert('불러오기 실패: '+e.message);}};rd.readAsText(file,'utf-8');input.value='';},
   exportSummary(){const R=compute();download('inventory_summary_'+today()+'.csv',csv([['품목코드','품목명','규격','발주(생산중)','선적대기','운송중','창고재고','출고확정','현재가용','총예상가용','다음가용예정일','다음입고수량','결품예상일','안전재고']].concat(Object.values(R).filter(r=>r.active).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.spec,r.ordered,r.ready,r.transit,r.wh,r.alloc,r.avail,r.total,r.next?r.next.x.whShow[0]:'',r.next?r.next.qty:'',r.short||'',r.p.safety||'']))));},
   exportPipe(){download('inventory_pipeline_'+today()+'.csv',csv([['단계','발주번호','공급처','품목코드','품목명','수량','단가','통화','발주일','생산완료예정','생산완료실적','ETD','ETA','B/L','컨테이너','입고(가용)예정','입고일','추정여부','메모']].concat(S.pipeline.map(e=>{const x=est(e),p=P(e.productId)||{};return [STAGE[e.stage],e.poNo,e.supplier,p.sku,p.name,e.qty,e.unitPrice==null?'':e.unitPrice,e.currency||'',e.orderDate,e.prodDue,e.prodDone,x.etd[0],x.eta[0],e.blNo,e.container,x.whShow[0],e.receivedDate,x.whShow[1]==='c'?'자동추정':'',e.memo];}))));},
   exportOrders(){download('inventory_orders_'+today()+'.csv',csv([['주문번호','거래처','품목코드','품목명','수량','주문일','출고예정일','상태','출고일','메모']].concat(S.orders.map(o=>{const p=P(o.productId)||{};return [o.orderNo,o.customer,p.sku,p.name,o.qty,o.orderDate,o.shipDate,OSTAT[o.status],o.shippedDate,o.memo];}))));},
@@ -741,7 +743,8 @@ const XL={
   out:{label:'출고완료',desc:'출고확정 주문을 출고완료 처리하고 창고 재고를 차감합니다. 양식에 미출고 주문이 채워져 있습니다.',
     cols:[['orderNo','주문번호'],['customer','거래처'],['sku','품목코드',1],['name','품목명(참고)'],['qty','수량',1],['date','출고일','d',1]],
     prefill:st=>st.orders.filter(o=>o.status==='CONFIRMED').map(o=>{const p=pOf(st,o.productId);return [o.orderNo,o.customer,p.sku,p.name,o.qty,''];})},
-  stock:{label:'재고실사 · 기초재고',desc:'창고 실제 수량을 입력하면 현재 재고와의 차이만큼 조정합니다. 처음 사용할 때 기초재고 입력에도 사용하세요.',
+  stock:{label:'창고 재고 (ERP 재고현황)',desc:'ERP에서 내려받은 재고현황 엑셀(품목코드·품목명·규격·당수량·가용 재고수량·미판매·미입고·현재 재고수량)을 그대로 올리면, 현재 재고수량에 맞춰 창고 재고(실재고)를 조정합니다. 처음 사용할 때 기초재고 입력에도 사용하세요.',
+    colsText:'인식하는 열: <b>품목코드, 현재 재고수량</b>(필수) · 품목명, 규격, 당수량(분자), 가용 재고수량, 미판매, 미입고 — 창고별 열은 있어도 무시, 첫 줄 회사명·날짜, 합계·출력일시 줄도 자동 무시',customTemplate:true,
     cols:[['sku','품목코드',1],['name','품목명(참고)'],['qty','실사수량',1],['date','기준일','d'],['memo','메모']],
     prefill:st=>{const w={};st.moves.forEach(m=>w[m.productId]=(w[m.productId]||0)+Number(m.qty));return st.products.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).map(p=>[p.sku,p.name,w[p.id]||0,'','']);}}
 };
@@ -781,7 +784,8 @@ function xlApply(type,st,r){
   }
   let note='';
   if(!p){
-    if(type==='po'&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:r.cnName||'',eaCt:'',rmb:r.currency==='RMB'?r.unitPrice:'',usd:r.currency==='USD'?r.unitPrice:'',barcode:'',supplier:r.supplier||'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
+    if(type==='stock'&&r.erp&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:'',eaCt:r.eaCt===''||r.eaCt==null?'':r.eaCt,rmb:'',usd:'',barcode:'',supplier:'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
+    else if(type==='po'&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:r.cnName||'',eaCt:'',rmb:r.currency==='RMB'?r.unitPrice:'',usd:r.currency==='USD'?r.unitPrice:'',barcode:'',supplier:r.supplier||'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
     else return {err:'등록되지 않은 품목코드: '+r.sku+(type==='po'?' (품목명을 적으면 자동 등록)':''),desc:label};
   }
   const q=r.qty;
@@ -820,9 +824,9 @@ function xlApply(type,st,r){
   }
   if(type==='stock'){
     let wh=0,any=false;st.moves.forEach(m=>{if(m.productId===p.id){wh+=Number(m.qty);any=true;}});
-    const diff=q-wh;if(!diff)return {desc:label,msg:'변동 없음 ('+fmt(q)+')',skip:true};
-    st.moves.push({id:uid(),date:r.date||T,productId:p.id,type:any?'ADJ':'IN',qty:diff,ref:any?'재고실사':'기초재고',memo:r.memo||''});
-    return {desc:label,msg:(any?'실사 조정 ':'기초재고 ')+fmt(wh)+' → '+fmt(q)+' ('+(diff>0?'+':'')+fmt(diff)+')'};
+    const diff=q-wh,neg=q<0?' ⚠ 마이너스 재고':'';if(!diff)return {desc:label,msg:'변동 없음 ('+fmt(q)+')'+note,skip:!note};
+    st.moves.push({id:uid(),date:r.date||T,productId:p.id,type:any?'ADJ':'IN',qty:diff,ref:r.erp?(any?'ERP 재고현황':'기초재고(ERP)'):(any?'재고실사':'기초재고'),memo:r.memo||''});
+    return {desc:label,msg:(any?(r.erp?'재고 맞춤 ':'실사 조정 '):'기초재고 ')+fmt(wh)+' → '+fmt(q)+' ('+(diff>0?'+':'')+fmt(diff)+')'+neg+note,warn:!!neg};
   }
 }
 function xlParse(type,aoa){
@@ -856,13 +860,73 @@ function xlParse(type,aoa){
 function xlPreview(type,aoa,fileName,parsed){
   const res=parsed||xlParse(type,aoa);
   if(res.fatal){ui.xlPrev={type,fileName,fatal:res.fatal};return;}
-  const st=JSON.parse(JSON.stringify(S));
+  const st=JSON.parse(JSON.stringify(S));if(res.pre)res.pre(st);
   const out=res.rows.map(x=>{
     if(x.errs.length)return {rowNo:x.rowNo,status:'err',desc:(x.r.sku||'')+' '+(x.r.name||''),msg:x.errs.join(', ')};
     let o;try{o=xlApply(type,st,x.r);}catch(e){o={err:'처리 오류: '+e.message};}
     return {rowNo:x.rowNo,status:o.err?'err':o.skip?'skip':o.warn?'warn':'ok',desc:o.desc||'',msg:o.err||o.msg||''};
   });
+  if(res.post){try{(res.post(st)||[]).forEach(x=>out.push(x));}catch(e){out.push({rowNo:'',status:'err',desc:'추가 처리',msg:e.message});}}
   ui.xlPrev={type,fileName,rows:out,st};
+}
+/* ----- ERP 재고현황 형식 ----- */
+function parseErpStock(aoa){
+  const N=v=>String(v==null?'':v).toLowerCase().replace(/[^0-9a-z가-힣\u3400-\u9fff]/g,'');
+  for(let i=0;i<Math.min(aoa.length,15);i++){
+    const R0=(aoa[i]||[]).map(N),f=ks=>R0.findIndex(x=>x&&ks.some(k=>x===k||x.startsWith(k)));
+    const c={sku:f(['품목코드','상품코드']),cur:f(['현재재고수량','현재재고','현재고'])};
+    if(c.sku<0||c.cur<0)continue;
+    c.name=f(['품목명','상품명','품명']);c.spec=f(['규격']);c.ea=f(['당수량']);c.avail=f(['가용재고수량','가용재고']);c.sold=f(['미판매']);c.unrecv=f(['미입고']);
+    let date='';for(let k=0;k<i;k++){const t=(aoa[k]||[]).join(' ');const m=t.match(/(20\d{2})[\/.\-](\d{1,2})[\/.\-](\d{1,2})/);if(m){date=m[1]+'-'+p2(+m[2])+'-'+p2(+m[3]);break;}}
+    const rows=[];
+    for(let r=i+1;r<aoa.length;r++){
+      const a=aoa[r]||[],sku=String(a[c.sku]==null?'':a[c.sku]).trim();
+      if(!sku||/^(합계|총계|소계)$/.test(sku.replace(/\s/g,''))||/^20\d{2}[\/.\-]\d{1,2}[\/.\-]\d{1,2}/.test(sku))continue;
+      const num=j=>{if(j<0)return 0;const n=pNum(a[j]);return n==null||Number.isNaN(n)?0:n;},raw=a[c.cur],q=pNum(raw);
+      const errs=[];if(Number.isNaN(q))errs.push('현재 재고수량 숫자 오류('+raw+')');
+      rows.push({rowNo:r+1,errs,r:{erp:true,sku,name:c.name>=0?String(a[c.name]||'').trim():'',spec:c.spec>=0?String(a[c.spec]||'').trim():'',eaCt:c.ea>=0&&a[c.ea]!==''?num(c.ea):'',
+        qty:q==null?0:q,sold:num(c.sold),avail:num(c.avail),unrecv:num(c.unrecv),date:'',memo:''}});
+    }
+    if(rows.length)return {rows,date};
+  }
+  return null;
+}
+function erpStockModal(es,fileName){
+  const ok=es.rows.filter(x=>!x.errs.length),tq=ok.reduce((s,x)=>s+x.r.qty,0),ts=ok.reduce((s,x)=>s+x.r.sold,0),ns=ok.filter(x=>x.r.sold).length;
+  const inFile=new Set(ok.map(x=>x.r.sku)),R=compute(),miss=Object.values(R).filter(r=>r.wh&&!inFile.has(r.p.sku));
+  const prevErp=S.orders.filter(o=>o.erp&&o.status==='CONFIRMED').length;
+  openModal('ERP 재고현황 업로드 — '+fileName,'<div class="note" style="margin-top:0">품목 <b>'+ok.length+'</b>개 · 현재 재고수량 합계 <b>'+fmt(tq)+'</b>'+'</div>'+
+    '<div class="grid2">'+fld('재고 기준일',inp('d',es.date||today(),'date','required'))+'</div>'+
+    '<label style="display:flex;gap:8px;margin:12px 0 4px;align-items:flex-start"><input type="checkbox" name="zero" checked><span><b>파일에 없는 품목은 재고 0으로 맞춤</b><br><span class="mute">ERP 재고현황은 재고가 있는 품목만 나옵니다. 지금 프로그램에 재고가 있는데 파일에 없는 품목: <b>'+miss.length+'</b>개</span></span></label>'+
+    '<label style="display:flex;gap:8px;margin:10px 0 4px;align-items:flex-start"><input type="checkbox" name="sold"><span><b>ERP 미판매 수량을 출고확정으로 반영</b> ('+ns+'개 품목 · 총 '+fmt(ts)+'개)<br><span class="mute">켜면 ERP의 가용 재고수량과 프로그램의 현재 가용이 같아집니다. 주문을 프로그램에 따로 입력하고 있다면 이중으로 잡히니 켜지 마세요.'+(prevErp?' 이전 ERP 반영분 '+prevErp+'건은 새 값으로 교체됩니다.':'')+'</span></span></label>',
+  f=>{const d=fv(f,'d'),zero=f.elements.zero.checked,sold=f.elements.sold.checked;
+    const rows=es.rows.map(x=>({rowNo:x.rowNo,errs:x.errs,r:Object.assign({},x.r,{date:d})}));
+    const post=st=>{
+      const out=[],skus=new Set(rows.filter(x=>!x.errs.length).map(x=>x.r.sku));
+      if(zero){const w={};st.moves.forEach(m=>w[m.productId]=(w[m.productId]||0)+Number(m.qty));
+        st.products.forEach(p=>{if(!skus.has(p.sku)&&w[p.id]){st.moves.push({id:uid(),date:d,productId:p.id,type:'ADJ',qty:-w[p.id],ref:'ERP 재고현황',memo:'파일에 없음 → 0'});
+          out.push({rowNo:'',status:'ok',desc:p.sku+' '+p.name,msg:'파일에 없음 → 재고 '+fmt(w[p.id])+' → 0'});}});}
+      if(sold){const old=st.orders.filter(o=>o.erp&&o.status==='CONFIRMED');st.orders=st.orders.filter(o=>!(o.erp&&o.status==='CONFIRMED'));let n=0,t=0;
+        rows.forEach(x=>{if(x.errs.length||!x.r.sold)return;const p=st.products.find(pp=>pp.sku===x.r.sku);if(!p)return;
+          st.orders.push({id:uid(),orderNo:'ERP미판매',customer:'ERP 미판매',productId:p.id,qty:x.r.sold,orderDate:d,shipDate:'',status:'CONFIRMED',memo:'ERP 재고현황 '+d+' 기준',shippedDate:'',erp:true});n++;t+=x.r.sold;});
+        out.push({rowNo:'',status:'ok',desc:'ERP 미판매 → 출고확정',msg:n+'개 품목 · 총 '+fmt(t)+'개 반영'+(old.length?' (이전 ERP 반영분 '+old.length+'건 교체)':'')});}
+      return out;};
+    const pre=st=>{st.whSnap={date:d};};
+    xlPreview('stock',null,fileName,{rows,post,pre});setTimeout(render,0);return true;},{ok:'다음 (미리보기)'});
+}
+function erpStockTemplate(){
+  if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
+  const R=compute(),hdr=['품목코드','품목명','규격','당수량(분자)','가용 재고수량','미판매','미입고','현재 재고수량'];
+  const rows=Object.values(R).filter(r=>r.wh).sort((a,b)=>a.p.sku.localeCompare(b.p.sku)).map(r=>[r.p.sku,r.p.name,r.p.spec||'',r.p.eaCt===''?'':r.p.eaCt,r.wh-r.alloc,r.alloc||'',r.pipe||'',r.wh]);
+  const data=[[COMPANY_TITLE+' / '+today().replace(/-/g,'/')+'  / 재고현황'],hdr].concat(rows.length?rows:[['100','나이스샷 골프장갑 홀더','',500,1000,'','',1000]]);
+  const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[16,36,18,10,12,8,8,12].map(w=>({wch:w}));
+  for(let ri=2;ri<data.length;ri++){const a=XLSX.utils.encode_cell({r:ri,c:0});if(ws[a])ws[a]={t:'s',v:String(data[ri][0]),z:'@'};}
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'재고현황');
+  const g=XLSX.utils.aoa_to_sheet([['작성 방법 — 창고 재고 (ERP 재고현황)'],['ERP에서 내려받은 재고현황 엑셀을 그대로 올리면 됩니다. 이 양식은 같은 형식에 현재 프로그램 재고를 채운 것입니다.'],[''],
+    ['· 필수: 품목코드, 현재 재고수량 — 현재 재고수량에 맞춰 창고 재고(실재고)를 조정합니다'],['· 창고별 수량 열이 있어도 무시합니다'],
+    ['· 첫 줄 “회사명 / 2026/10/07 / 재고현황”의 날짜가 재고 기준일로 자동 입력됩니다'],['· 합계 줄과 맨 아래 출력일시 줄은 자동으로 무시합니다'],
+    ['· 업로드할 때 선택: 파일에 없는 품목을 0으로 맞출지, ERP 미판매를 출고확정으로 반영할지'],['· 품목 마스터에 없는 품목코드는 품목명·규격·당수량으로 자동 등록됩니다']]);g['!cols']=[{wch:110}];XLSX.utils.book_append_sheet(wb,g,'작성방법');
+  XLSX.writeFile(wb,'grachen_template_stock_'+today().replace(/-/g,'')+'.xlsx');
 }
 /* ----- 그라첸 발주서(소싱 단가리스트) 형식 ----- */
 const POH={qty:['발주수량','订单数量','주문수량'],sku:['품목코드','产品号','상품코드'],name:['폼목명','품목명','품명','상품명','产品名'],spec:['규격','尺寸'],material:['자재','材料','재질'],
@@ -973,7 +1037,7 @@ function vXl(){
       h+='<div class="card"><h2>미리보기 · '+esc(pv.fileName)+' <span class="sub">'+pv.rows.length+'행 — 반영 '+n+' · 오류 '+c.err+(c.skip?' · 변동없음 '+c.skip:'')+(c.warn?' · 주의 '+c.warn:'')+'</span></h2>'+
       '<div class="toolbar"><button class="btn p" '+(n?'':'disabled')+' onclick="App.xlCommit()">'+n+'건 반영하기</button><button class="btn" onclick="App.xlCancel()">취소</button>'+(c.err?'<span class="late">오류 행은 제외하고 반영됩니다. 전부 반영하려면 엑셀을 고친 뒤 다시 올리세요.</span>':'')+'</div>'+
       '<div class="tw" style="max-height:55vh"><table><tr><th class="n">엑셀 행</th><th>결과</th><th>내용</th><th>메시지</th></tr>'+
-      pv.rows.slice().sort((a,b)=>({err:0,warn:1,ok:2,skip:3}[a.status])-({err:0,warn:1,ok:2,skip:3}[b.status])||a.rowNo-b.rowNo).slice(0,1000).map(r=>'<tr'+(r.status==='err'?' class="negbg"':'')+'><td class="n">'+r.rowNo+'</td><td>'+({ok:'<span class="pos">✓ 반영</span>',warn:'<span class="low">✓ 반영(주의)</span>',err:'<span class="neg">✗ 오류</span>',skip:'<span class="mute">– 건너뜀</span>'}[r.status])+'</td><td>'+esc(r.desc)+'</td><td class="'+(r.status==='err'?'neg':r.status==='warn'?'low':'mute')+'">'+esc(r.msg)+'</td></tr>').join('')+
+      pv.rows.slice().sort((a,b)=>({err:0,warn:1,ok:2,skip:3}[a.status])-({err:0,warn:1,ok:2,skip:3}[b.status])||(a.rowNo||1e9)-(b.rowNo||1e9)).slice(0,1000).map(r=>'<tr'+(r.status==='err'?' class="negbg"':'')+'><td class="n">'+r.rowNo+'</td><td>'+({ok:'<span class="pos">✓ 반영</span>',warn:'<span class="low">✓ 반영(주의)</span>',err:'<span class="neg">✗ 오류</span>',skip:'<span class="mute">– 건너뜀</span>'}[r.status])+'</td><td>'+esc(r.desc)+'</td><td class="'+(r.status==='err'?'neg':r.status==='warn'?'low':'mute')+'">'+esc(r.msg)+'</td></tr>').join('')+
       (pv.rows.length>1000?'<tr><td colspan="4" class="mute">… 외 '+(pv.rows.length-1000)+'행 (오류·주의 행은 위에 모두 표시됨)</td></tr>':'')+(pv.rows.length?'':'<tr><td colspan="4" class="empty">데이터 행이 없습니다</td></tr>')+'</table></div></div>';
     }
   }
@@ -982,13 +1046,14 @@ function vXl(){
 Object.assign(App,{
   goXl(t){ui.xlType=t;ui.xlPrev=null;ui.tab='xl';window.scrollTo(0,0);render();},
   xlType(t){ui.xlType=t;ui.xlPrev=null;render();},
-  xlTemplate(){if(ui.xlType==='po')poTemplate();else xlTemplate(ui.xlType);},
+  xlTemplate(){if(ui.xlType==='po')poTemplate();else if(ui.xlType==='stock')erpStockTemplate();else xlTemplate(ui.xlType);},
   xlExportAll,
   xlFile(input){const f=input.files[0];if(!f)return;input.value='';
     if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
     const rd=new FileReader();rd.onload=()=>{try{const wb=XLSX.read(new Uint8Array(rd.result),{type:'array'});
       const sheets=wb.SheetNames.map(n=>XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}));
       if(ui.xlType==='po'){for(const a of sheets){const ps=parsePoSheet(a);if(ps){poHeaderModal(ps,f.name);return;}}}
+      if(ui.xlType==='stock'){for(const a of sheets){const es=parseErpStock(a);if(es){erpStockModal(es,f.name);return;}}}
       xlPreview(ui.xlType,sheets[0],f.name);render();}catch(e){alert('파일을 읽지 못했습니다: '+e.message);}};rd.readAsArrayBuffer(f);},
   xlCommit(){const pv=ui.xlPrev;if(!pv||!pv.st)return;const n=pv.rows.filter(r=>r.status==='ok'||r.status==='warn').length;
     if(!confirm(XL[pv.type].label+' '+n+'건을 반영할까요?'))return;S=pv.st;ui.xlPrev=null;ui.sel.clear();save();render();toast(XL[pv.type].label+' '+n+'건 반영 완료');},
@@ -1002,7 +1067,7 @@ function ghCfg(){let c={};try{c=JSON.parse(localStorage.getItem('grachen_gh')||'
 function ghCfgSave(c){try{localStorage.setItem('grachen_gh',JSON.stringify(c));}catch(e){}}
 function setMode(m){MODE=m;try{localStorage.setItem('grachen_mode',m);}catch(e){}}
 const ser=o=>JSON.stringify(o,null,1);
-function norm(d){const b=blank();d=d||{};return {settings:Object.assign(b.settings,d.settings||{}),products:d.products||[],pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[]};}
+function norm(d){const b=blank();d=d||{};return {settings:Object.assign(b.settings,d.settings||{}),products:d.products||[],pipeline:d.pipeline||[],moves:d.moves||[],orders:d.orders||[],whSnap:d.whSnap||null};}
 function nowHM(){const d=new Date();return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());}
 function b64enc(str){const u=new TextEncoder().encode(str);let bin='';for(let i=0;i<u.length;i+=0x8000)bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(bin);}
 function b64dec(b){const bin=atob(String(b).replace(/\s/g,''));const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new TextDecoder().decode(u);}
@@ -1058,6 +1123,7 @@ function merge3(base,local,remote){
     });
     out[c]=[...res.values()];
   });
+  {const js=x=>JSON.stringify(x==null?null:x);out.whSnap=js(local.whSnap)!==js(base.whSnap)?local.whSnap:remote.whSnap;}
   return {data:out,conflict};
 }
 function replaceS(d){
