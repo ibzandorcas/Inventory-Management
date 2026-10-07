@@ -244,6 +244,7 @@ function availAt(r,D){let s=r.wh-r.alloc;r.inb.forEach(i=>{if(i.date<=D)s+=i.qty
 
 /* ================= 렌더 ================= */
 const TABS=[['dash','대시보드'],['pipe','발주·생산·선적'],['ship','선적(B/L)'],['wh','창고 수불'],['ord','주문·출고'],['atp','가용 일정'],['prod','품목'],['xl','엑셀 업로드'],['set','설정·백업']];
+let lastTab=null;
 function render(){
   const a=document.activeElement,aid=a&&a.id,pos=a&&a.selectionStart;
   $('#nav').innerHTML=TABS.map(t=>'<button class="'+(ui.tab===t[0]?'on':'')+'" onclick="App.tab(\''+t[0]+'\')">'+t[1]+'</button>').join('');
@@ -251,8 +252,11 @@ function render(){
   if(MODE==='github'&&!gh.ready){$('#nav').innerHTML='';$('#main').innerHTML=gh.loading&&!gh.err&&ghCfg().token?'<div class="card empty" style="max-width:720px;margin:30px auto">GitHub에서 재고 데이터를 불러오는 중…</div>':vConnect();return;}
   const R=compute();
   const V={dash:vDash,pipe:vPipe,ship:vShip,wh:vWh,ord:vOrd,atp:vAtp,prod:vProd,xl:vXl,set:vSet}[ui.tab];
+  const sv=lastTab===ui.tab?[...$('#main').querySelectorAll('.tw,[data-sc]')].map(el=>[el.scrollTop,el.scrollLeft]):null,wy=window.scrollY;
   $('#main').innerHTML=(S.products.length||ui.tab==='prod'||ui.tab==='set'||ui.tab==='xl')?V(R):vEmpty();
-  if(aid){const el=document.getElementById(aid);if(el){el.focus();try{if(pos!=null)el.setSelectionRange(pos,pos);}catch(e){}}}
+  if(sv){[...$('#main').querySelectorAll('.tw,[data-sc]')].forEach((el,i)=>{const v=sv[i];if(v){el.scrollTop=v[0];el.scrollLeft=v[1];}});if(window.scrollY!==wy)window.scrollTo(0,wy);}
+  lastTab=ui.tab;
+  if(aid){const el=document.getElementById(aid);if(el){el.focus({preventScroll:true});try{if(pos!=null)el.setSelectionRange(pos,pos);}catch(e){}}}
 }
 /* 검색 입력칸은 그대로 두고 나머지만 다시 그리기 — 한글 입력(조합) 중에도 실시간 검색 */
 function renderKeep(keep){
@@ -326,7 +330,7 @@ function vDash(R){
   const tog=(k,n)=>n>6?'<button class="btn s" style="margin-left:auto" onclick="App.set(\''+k+'\','+(!ui[k])+')">'+(ui[k]?'▲ 접기':'▼ 펼쳐서 전체 보기')+'</button>':'';
   h+='<div class="two"><div class="card"><h2>확인 필요 <span class="sub">'+al.length+'건</span>'+
     (al.length?AT.filter(a=>acnt[a[0]]).map(a=>'<button class="chip '+(ui.alType===a[0]?'on':'')+'" onclick="App.set(\'alType\',\''+(ui.alType===a[0]?'':a[0])+'\')">'+a[1]+' '+acnt[a[0]]+'</button>').join(''):'')+tog('alExp',alv.length)+'</h2>'+
-    (al.length?'<div style="'+(ui.alExp?'':'max-height:260px;overflow:auto;')+'border:1px solid var(--line);border-radius:6px;padding:8px 10px"><ul class="alerts">'+alv.join('')+'</ul></div>':'<div class="mute">특이사항 없음</div>')+'</div>';
+    (al.length?'<div data-sc style="'+(ui.alExp?'':'max-height:260px;overflow:auto;')+'border:1px solid var(--line);border-radius:6px;padding:8px 10px"><ul class="alerts">'+alv.join('')+'</ul></div>':'<div class="mute">특이사항 없음</div>')+'</div>';
   h+='<div class="card"><h2>향후 30일 일정 <span class="sub">'+upl.length+'건 · 생산완료 · 선적 · 입고 · 출고</span>'+tog('upExp',upl.length)+'</h2><div class="tw" style="max-height:'+(ui.upExp?'none':'260px')+'"><table><tr><th>날짜</th><th>구분</th><th>품목</th><th class="n">수량</th><th>참조</th></tr>'+
     (upl.length?upl.map(u=>{const e=u[3],o=u[4];return '<tr><td>'+dcell(u[0])+'</td><td><span class="badge st-'+u[2]+'">'+u[1]+'</span></td><td>'+pn(e?e.productId:o.productId)+'</td><td class="n">'+(o?'−':'+')+fmt(e?e.qty:o.qty)+'</td><td class="mute">'+esc(e?(e.blNo||e.poNo):(o.orderNo+' '+o.customer))+'</td></tr>';}).join(''):'<tr><td colspan="5" class="mute">일정 없음</td></tr>')+
     '</table></div></div></div>';
