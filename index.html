@@ -450,12 +450,14 @@ function vShip(){
   const ready=S.pipeline.filter(e=>e.stage==='READY').map(e=>({e,x:est(e)})).sort((a,b)=>a.x.etd[0]<b.x.etd[0]?-1:1);
   [...ui.sel].forEach(id=>{if(!S.pipeline.find(e=>e.id===id))ui.sel.delete(id);});
   let h=selBar(S.pipeline.filter(e=>ui.sel.has(e.id)));
-  h+='<div class="card"><h2>선적대기 <button class="btn s" onclick="App.goXl(\'ship\')">선적 엑셀 업로드</button> <button class="btn s" onclick="App.goXl(\'recv\')">입고 엑셀 업로드</button><span class="sub">생산 완료되어 선적을 기다리는 수량 · 체크 후 한 B/L로 묶어 선적 처리</span></h2>';
+  h+='<div class="card"><h2>선적대기 <button class="btn s" onclick="App.goXl(\'prod\')">선적대기 리스트 업로드</button> <button class="btn s" onclick="App.goXl(\'ship\')">선적 엑셀 업로드</button> <button class="btn s" onclick="App.goXl(\'recv\')">입고 엑셀 업로드</button><span class="sub">생산 완료되어 선적을 기다리는 수량 · 체크 후 한 B/L로 묶어 선적 처리</span></h2>';
   if(!ready.length) h+='<div class="mute">선적대기 물량이 없습니다.</div>';
   else{
     const selR=ready.filter(r=>ui.sel.has(r.e.id)).length;
-    h+='<div class="toolbar"><button class="btn p" '+(selR?'':'disabled')+' onclick="App.bulkShip()">선택 '+selR+'건 선적 처리 (수량 나눠서 가능)</button></div><div class="tw"><table><tr><th></th><th>발주번호</th><th>공급처</th><th>품목</th><th class="n">수량</th><th>생산완료</th><th>ETD(예정)</th><th>메모</th><th>작업</th></tr>'+
-    ready.map(({e,x})=>'<tr><td><input type="checkbox" '+(ui.sel.has(e.id)?'checked':'')+' onclick="App.sel(\''+e.id+'\',this.checked)"></td><td>'+esc(e.poNo)+'</td><td class="mute">'+esc(e.supplier)+'</td><td>'+pn(e.productId)+'</td><td class="n"><b>'+fmt(e.qty)+'</b></td><td>'+dcell(x.prod)+'</td><td>'+dcell(x.etd)+'</td><td class="mute">'+esc(e.memo)+'</td><td>'+rowActs(e,0)+'</td></tr>').join('')+'</table></div>';
+    h+='<div class="toolbar"><button class="btn p" '+(selR?'':'disabled')+' onclick="App.bulkShip()">선택 '+selR+'건 선적 처리 (수량 나눠서 가능)</button></div><div class="tw"><table><tr><th></th><th>발주번호</th><th>공급처</th><th>품목</th><th class="n">수량</th><th class="n">CTNS</th><th class="n">CBM</th><th class="n">G.W(kg)</th><th>생산완료</th><th>ETD(예정)</th><th>메모</th><th>작업</th></tr>'+
+    ready.map(({e,x})=>'<tr><td><input type="checkbox" '+(ui.sel.has(e.id)?'checked':'')+' onclick="App.sel(\''+e.id+'\',this.checked)"></td><td>'+esc(e.poNo)+'</td><td class="mute">'+esc(e.supplier)+'</td><td>'+pn(e.productId)+'</td><td class="n"><b>'+fmt(e.qty)+'</b></td><td class="n">'+(e.pack&&e.pack.ctns?fmt(e.pack.ctns):'<span class="mute">-</span>')+'</td><td class="n">'+(e.pack&&e.pack.cbm?(Math.round(e.pack.cbm*100)/100):'<span class="mute">-</span>')+'</td><td class="n">'+(e.pack&&e.pack.gw?fmt(Math.round(e.pack.gw)):'<span class="mute">-</span>')+'</td><td>'+dcell(x.prod)+'</td><td>'+dcell(x.etd)+'</td><td class="mute">'+esc(e.memo)+'</td><td>'+rowActs(e,0)+'</td></tr>').join('')+
+    (()=>{const sm=k=>ready.reduce((s,r)=>s+((r.e.pack&&r.e.pack[k])||0),0),ss=ready.filter(r=>ui.sel.has(r.e.id)),sk=k=>ss.reduce((s,r)=>s+((r.e.pack&&r.e.pack[k])||0),0);
+      return '<tr class="sum"><td colspan="4">합계'+(ss.length?' (선택 '+ss.length+'건: '+fmt(ss.reduce((s,r)=>s+r.e.qty,0))+'개 · '+fmt(sk('ctns'))+' CTNS · '+(Math.round(sk('cbm')*100)/100)+' CBM)':'')+'</td><td class="n">'+fmt(ready.reduce((s,r)=>s+r.e.qty,0))+'</td><td class="n">'+fmt(sm('ctns'))+'</td><td class="n">'+(Math.round(sm('cbm')*100)/100)+'</td><td class="n">'+fmt(Math.round(sm('gw')))+'</td><td colspan="4"></td></tr>';})()+'</table></div>';
   }
   h+='</div>';
   const g={};
@@ -596,7 +598,10 @@ function closeModal(){$('#modal').classList.remove('on');modalOk=null;}
 function modalSubmit(){if(!modalOk)return;const f=$('#mForm');if(!f.reportValidity())return;const r=modalOk(f);if(r!==false){closeModal();save();render();}}
 function lineRow(pid,qty,wp){return '<div class="line'+(wp?' wp':'')+'">'+prodSel('lp',pid)+'<input name="lq" type="number" min="1" placeholder="수량" value="'+esc(qty||'')+'" required>'+(wp?'<input name="lpr" type="number" min="0" step="any" placeholder="단가">':'')+'<button type="button" class="btn s d" onclick="this.parentNode.remove()">×</button><div class="hint"></div></div>';}
 function readLines(f){const out=[];f.querySelectorAll('.line').forEach(l=>{const p=l.querySelector('[name=lp]').value,q=Number(l.querySelector('[name=lq]').value)||0,pe=l.querySelector('[name=lpr]');if(p&&q>0)out.push([p,q,pe&&pe.value!==''?Number(pe.value):'']);});return out;}
-function split(arr,item,qty){if(qty>=item.qty)return item;const rest=Object.assign({},item,{id:uid(),qty:item.qty-qty});item.qty=qty;arr.push(rest);return item;}
+function split(arr,item,qty){if(qty>=item.qty)return item;const tot=Number(item.qty),rest=Object.assign({},item,{id:uid(),qty:tot-qty});
+  if(item.pack){const sc=(pk,sh)=>({ctns:pk.unit?Math.round((sh*tot)/pk.unit*100)/100:Math.round((pk.ctns||0)*sh*100)/100,unit:pk.unit,gw:Math.round((pk.gw||0)*sh*100)/100,nw:Math.round((pk.nw||0)*sh*100)/100,cbm:Math.round((pk.cbm||0)*sh*10000)/10000});
+    const pk=item.pack;item.pack=sc(pk,qty/tot);rest.pack=sc(pk,(tot-qty)/tot);}
+  item.qty=qty;arr.push(rest);return item;}
 
 /* ================= 동작 ================= */
 const App={
@@ -795,7 +800,8 @@ const XL={
     colsText:'인식하는 열: <b>품목코드, 발주수량</b>(필수) · 폼목명(품목명), 규격, 자재, 공장(구매처), 단가, 로고, 로고 위치, 포장방식, 적요 — 품목당 2줄(아랫줄 중국어 품명) 형식 그대로 사용',customTemplate:true,
     cols:[['poNo','발주번호',1],['supplier','공급처'],['sku','품목코드',1],['name','품목명'],['qty','수량',1],['orderDate','발주일','d'],['prodDue','생산완료예정일','d'],['etd','선적예정일(ETD)','d'],['memo','메모']],
     example:[['PO-2610-01','Jiangxi Jingshang','QS-FP28','세라믹 프라이팬 28cm',1000,'2026-10-01','2026-11-10','2026-11-15','']]},
-  prod:{label:'생산완료',desc:'발주(생산중) 수량을 ② 선적대기로 옮깁니다. 양식에 현재 생산중인 내역이 채워져 있으니 완료된 행만 남기고 날짜를 입력하세요.',
+  prod:{label:'생산완료 (선적대기 리스트)',desc:'공장별 생산완료·선적대기 리스트(工厂·编号·品名·件数·数量·毛重·净重·尺码)를 그대로 올리면 ② 선적대기로 등록합니다. 같은 품목의 발주(생산중) 수량이 있으면 거기서 차감하고, 부족하거나 발주가 없으면 선적대기로 새로 등록합니다(선택). 박스수·중량·CBM도 함께 저장됩니다.',
+    colsText:'인식하는 열: <b>编号(Nos·품목코드), 数量 Total(수량)</b>(필수) · 工厂(factory), 品名(한문/中文), 件数(CTNS), 数量 Unit(입수), 毛重(G.WT), 净重(N.WT), 尺码(CBM) — 수식 그대로 올려도 됩니다. TTL(합계) 줄은 무시',customTemplate:true,
     cols:[['poNo','발주번호'],['sku','품목코드',1],['name','품목명(참고)'],['qty','수량',1],['prodDone','생산완료일','d',1],['etd','선적예정일(ETD)','d']],
     prefill:st=>st.pipeline.filter(e=>e.stage==='ORDERED').map(e=>{const p=pOf(st,e.productId);return [e.poNo,p.sku,p.name,e.qty,'',e.etd||''];})},
   ship:{label:'선적',desc:'선적대기 수량을 ③ 운송중으로 옮깁니다(선적대기가 부족하면 생산중 수량에서 바로 선적 처리). 양식에 선적대기 내역이 채워져 있습니다.',
@@ -851,7 +857,8 @@ function xlApply(type,st,r){
   }
   let note='';
   if(!p){
-    if(type==='stock'&&r.erp&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:'',eaCt:r.eaCt===''||r.eaCt==null?'':r.eaCt,rmb:'',usd:'',barcode:'',supplier:'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
+    if(type==='prod'&&r.pl&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:'',cnName:r.cnName||'',eaCt:r.unit||'',rmb:'',usd:'',barcode:'',supplier:r.supplier||'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
+    else if(type==='stock'&&r.erp&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:'',eaCt:r.eaCt===''||r.eaCt==null?'':r.eaCt,rmb:'',usd:'',barcode:'',supplier:'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
     else if(type==='po'&&r.name){p={id:uid(),sku:r.sku,name:r.name,spec:r.spec||'',cnName:r.cnName||'',eaCt:'',rmb:r.currency==='RMB'?r.unitPrice:'',usd:r.currency==='USD'?r.unitPrice:'',barcode:'',supplier:r.supplier||'',safety:0,memo:''};st.products.push(p);note=' · 품목 신규등록';}
     else return {err:'등록되지 않은 품목코드: '+r.sku+(type==='po'?' (품목명을 적으면 자동 등록)':''),desc:label};
   }
@@ -865,6 +872,15 @@ function xlApply(type,st,r){
   const pick=stages=>st.pipeline.filter(e=>stages.includes(e.stage)&&e.productId===p.id&&(!r.poNo||e.poNo===r.poNo)&&(!r.blNo||stages[0]!=='TRANSIT'||e.blNo===r.blNo))
     .sort((a,b)=>stages.indexOf(a.stage)-stages.indexOf(b.stage)||byOrder(a,b));
   const refs=(r.poNo?r.poNo+' · ':'')+label+' · '+fmt(q);
+  if(type==='prod'&&r.pl){
+    const pk=x=>{const sh=r.qty?x.qty/r.qty:1;x.pack={ctns:r.unit?Math.round(x.qty/r.unit*100)/100:Math.round((r.ctns||0)*sh*100)/100,unit:r.unit||'',gw:Math.round((r.gw||0)*sh*100)/100,nw:Math.round((r.nw||0)*sh*100)/100,cbm:Math.round((r.cbm||0)*sh*10000)/10000};};
+    let left=q,used=0;const parts=[];
+    if(r.useOrd){const c=st.pipeline.filter(e=>e.stage==='ORDERED'&&e.productId===p.id).sort((a,b)=>(a.orderDate||'').localeCompare(b.orderDate||''));
+      for(const e of c){if(left<=0)break;const t=Math.min(left,Number(e.qty));const x=split(st.pipeline,e,t);x.stage='READY';x.prodDone=r.prodDone;if(r.etd)x.etd=r.etd;if(r.supplier&&!x.supplier)x.supplier=r.supplier;pk(x);left-=t;used+=t;parts.push((x.poNo||'발주')+' '+fmt(t));}}
+    if(left>0){if(!r.newLot)return {err:'생산중(발주) 수량 부족 — 발주 '+fmt(used)+' / 리스트 '+fmt(q)+' (부족분 신규 등록 옵션 꺼짐)',desc:label+' · '+fmt(q)};
+      const x={id:uid(),productId:p.id,qty:left,stage:'READY',poNo:r.plPo||'',supplier:r.supplier||p.supplier||'',orderDate:'',prodDue:'',prodDone:r.prodDone,etd:r.etd||'',eta:'',blNo:'',container:'',whDue:'',receivedDate:'',unitPrice:'',currency:'',memo:'선적대기 리스트 등록'};pk(x);st.pipeline.push(x);parts.push('신규 '+fmt(left));}
+    return {desc:(r.supplier?r.supplier+' · ':'')+label+' · '+fmt(q)+(r.ctns?' ('+fmt(r.ctns)+'CT)':''),msg:'→ 선적대기: '+parts.join(' + ')+note,warn:used>0&&left>0};
+  }
   if(type==='prod'){
     const h=consume(st.pipeline,pick(['ORDERED']),q,x=>{x.stage='READY';x.prodDone=r.prodDone;if(r.etd)x.etd=r.etd;});
     return h>=0?{err:'생산중 수량 부족 (현재 '+fmt(h)+')',desc:refs}:{desc:refs,msg:'→ 선적대기'};
@@ -935,6 +951,66 @@ function xlPreview(type,aoa,fileName,parsed){
   });
   if(res.post){try{(res.post(st)||[]).forEach(x=>out.push(x));}catch(e){out.push({rowNo:'',status:'err',desc:'추가 처리',msg:e.message});}}
   ui.xlPrev={type,fileName,rows:out,st};
+}
+/* ----- 선적대기(생산완료) 리스트 형식 : 工厂·编号·品名·件数·数量·毛重·净重·尺码 ----- */
+function parsePackingList(aoa){
+  const N=v=>String(v==null?'':v).toLowerCase().replace(/[^0-9a-z가-힣㐀-鿿]/g,'');
+  for(let i=0;i<Math.min(aoa.length,15);i++){
+    const R0=(aoa[i]||[]).map(N);if(!R0.some(x=>x==='编号'||x==='nos'||x.startsWith('品名')))continue;
+    const w=Math.max(...[0,1,2].map(k=>(aoa[i+k]||[]).length)),T=j=>[0,1,2].map(k=>N((aoa[i+k]||[])[j]));
+    const find=(ks,from)=>{for(let j=from||0;j<w;j++){if(T(j).some(x=>x&&ks.some(k=>x.startsWith(k))))return j;}return -1;};
+    const c={code:find(['编号','nos','품목코드']),fac:find(['工厂','factory','공장']),name:find(['品名','article','품명']),ctns:find(['件数','package','ctns']),qty:find(['数量','quantity','수량']),gw:find(['毛重','gwt']),nw:find(['净重','nwt']),cbm:find(['尺码','measurement','cbm'])};
+    if(c.code<0||c.qty<0)continue;
+    let tot=-1,unit=-1;for(let j=c.qty;j<Math.min(w,c.qty+3);j++){const t=T(j);if(t.includes('total'))tot=j;if(t.includes('unit'))unit=j;}
+    if(tot<0){tot=c.qty+1<w&&T(c.qty+1).every(x=>!x||x==='total')?c.qty+1:c.qty;}if(unit<0&&tot!==c.qty)unit=c.qty;
+    let start=i+1;while(start<i+4&&start<aoa.length){const a=aoa[start]||[];const v=String(a[c.code]==null?'':a[c.code]).trim();if(v&&!/^(nos|编号)$/i.test(v))break;start++;}
+    const rows=[];
+    for(let r=start;r<aoa.length;r++){
+      const a=aoa[r]||[],code=String(a[c.code]==null?'':a[c.code]).trim();
+      const f0=c.fac>=0?String(a[c.fac]==null?'':a[c.fac]).trim():'',f1=c.fac>=0&&c.fac+1<c.code?String(a[c.fac+1]==null?'':a[c.fac+1]).trim():'';
+      if(!code){continue;}if(/^(ttl|total|합계)$/i.test(code)||/^(ttl|total|합계)$/i.test(f0))continue;
+      const n=j=>{if(j<0)return null;const v=pNum(a[j]);return v==null||Number.isNaN(v)?null:v;};
+      const ct=n(c.ctns),un=unit>=0?n(unit):null;let q=n(tot);if((q==null||q===0)&&ct!=null&&un!=null)q=ct*un;
+      const errs=[];if(q==null)errs.push('수량(Total) 누락');else if(!(q>0))errs.push('수량은 0보다 커야 함');
+      const nm=c.name>=0?String(a[c.name]==null?'':a[c.name]).replace(/\s+/g,' ').trim():'',cn=c.name>=0&&c.name+1<w&&(c.ctns<0||c.name+1<c.ctns)?String(a[c.name+1]==null?'':a[c.name+1]).replace(/\s+/g,' ').trim():'';
+      rows.push({rowNo:r+1,errs,r:{pl:true,sku:code,name:nm,cnName:cn,supplier:f1||f0,supplierCn:f1?f0:'',qty:q||0,ctns:ct||0,unit:un||'',gw:n(c.gw)||0,nw:n(c.nw)||0,cbm:n(c.cbm)||0}});
+    }
+    if(rows.length)return {rows};
+  }
+  return null;
+}
+function plModal(pl,fileName){
+  const base=fileName.replace(/\.[^.]+$/,''),dm=base.match(/(20\d{2})[-._]?(\d{2})[-._]?(\d{2})/),dd=dm?dm[1]+'-'+dm[2]+'-'+dm[3]:today();
+  const ok=pl.rows.filter(x=>!x.errs.length),tq=ok.reduce((s,x)=>s+x.r.qty,0),tc=ok.reduce((s,x)=>s+x.r.ctns,0),tv=ok.reduce((s,x)=>s+x.r.cbm,0),tg=ok.reduce((s,x)=>s+x.r.gw,0);
+  const facs=[...new Set(ok.map(x=>x.r.supplier).filter(Boolean))];
+  const ordQty={};S.pipeline.forEach(e=>{if(e.stage==='ORDERED')ordQty[e.productId]=(ordQty[e.productId]||0)+Number(e.qty);});
+  const need={};ok.forEach(x=>need[x.r.sku]=(need[x.r.sku]||0)+x.r.qty);
+  let withOrd=0,short=0,noProd=0;Object.keys(need).forEach(k=>{const p=S.products.find(pp=>pp.sku===k);if(!p){noProd++;short++;return;}const o=ordQty[p.id]||0;if(o>0)withOrd++;if(o<need[k])short++;});
+  openModal('선적대기 리스트 업로드 — '+fileName,'<div class="note" style="margin-top:0">품목 <b>'+ok.length+'</b>행 · 총 <b>'+fmt(tq)+'</b>개 · <b>'+fmt(tc)+'</b> CTNS · '+(Math.round(tv*100)/100)+' CBM · '+fmt(Math.round(tg))+' KG<br>공장 '+facs.length+'곳: '+esc(facs.join(', '))+'</div>'+
+    '<div class="grid2">'+fld('생산완료일',inp('d',dd,'date','required'))+fld('선적 예정일(ETD)',inp('etd','','date'))+'</div>'+
+    '<label style="display:flex;gap:8px;margin:12px 0 4px;align-items:flex-start"><input type="checkbox" name="useOrd" checked><span><b>발주(생산중) 수량에서 차감</b><br><span class="mute">같은 품목의 발주가 있으면 오래된 발주부터 그 수량만큼 선적대기로 넘깁니다. 발주가 있는 품목: '+withOrd+'개</span></span></label>'+
+    '<label style="display:flex;gap:8px;margin:10px 0 4px;align-items:flex-start"><input type="checkbox" name="newLot" checked><span><b>발주가 없거나 부족한 수량은 선적대기로 새로 등록</b><br><span class="mute">해당 품목: '+short+'개'+(noProd?' (품목 마스터에 없는 '+noProd+'개는 자동 등록)':'')+'</span></span></label>'+
+    '<div class="grid2" style="margin-top:6px">'+fld('새로 등록되는 수량의 발주번호',inp('plPo','PL-'+dd.replace(/-/g,''),'text'))+'</div>',
+  f=>{const d=fv(f,'d'),o={prodDone:d,etd:fv(f,'etd'),useOrd:f.elements.useOrd.checked,newLot:f.elements.newLot.checked,plPo:fv(f,'plPo')};
+    const rows=pl.rows.map(x=>({rowNo:x.rowNo,errs:x.errs,r:Object.assign({},x.r,o)}));
+    xlPreview('prod',null,fileName,{rows});setTimeout(render,0);return true;},{ok:'다음 (미리보기)'});
+}
+function plTemplate(){
+  if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
+  const L=S.pipeline.filter(e=>e.stage==='ORDERED');
+  const data=[[],['','工厂','','编号','品名及规格','','件数','数量','','毛重','净重','尺码'],['','factory','','Nos','Article And Specification','','Package (CTNS)','Quantity (PCS)','','G.WT (KGS)','N.Wt  (KGS)','Measurement (CBM)'],['','','','','한문','中文','','Unit','Total','','','']];
+  (L.length?L:[null]).forEach(e=>{if(!e){data.push(['','顺禧','SHUN XI','QBCA015A','boo 스텐 하모니 주전자 1.5L','QS 1.5L 无漏水壶',118,30,3540,'','','']);return;}
+    const p=P(e.productId)||{},u=Number(p.eaCt)||'';data.push(['','',e.supplier||p.supplier||'',p.sku||'',p.name||'',p.cnName||'',u?Math.round(e.qty/u*100)/100:'',u,Number(e.qty),'','','']);});
+  data.push(['','TTL','','','','',{f:'SUM(G5:G'+(data.length)+')'},'',{f:'SUM(I5:I'+(data.length)+')'},{f:'SUM(J5:J'+(data.length)+')'},{f:'SUM(K5:K'+(data.length)+')'},{f:'SUM(L5:L'+(data.length)+')'}]);
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  ws['!merges']=[{s:{r:1,c:1},e:{r:1,c:2}},{s:{r:2,c:1},e:{r:3,c:2}},{s:{r:2,c:3},e:{r:3,c:3}},{s:{r:1,c:4},e:{r:1,c:5}},{s:{r:2,c:4},e:{r:2,c:5}},{s:{r:2,c:6},e:{r:3,c:6}},{s:{r:1,c:7},e:{r:1,c:8}},{s:{r:2,c:7},e:{r:2,c:8}},{s:{r:2,c:9},e:{r:3,c:9}},{s:{r:2,c:10},e:{r:3,c:10}},{s:{r:2,c:11},e:{r:3,c:11}}];
+  ws['!cols']=[3,8,14,16,40,30,10,8,10,10,10,12].map(w=>({wch:w}));
+  for(let r=4;r<data.length-1;r++){const a=XLSX.utils.encode_cell({r,c:3});if(ws[a])ws[a]={t:'s',v:String(data[r][3]),z:'@'};}
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sheet1');
+  const g=XLSX.utils.aoa_to_sheet([['작성 방법 — 생산완료 (선적대기 리스트)'],['공장에서 받는 생산완료·선적대기 리스트를 그대로 올리면 됩니다. 이 양식은 같은 형식에 현재 발주(생산중) 내역을 채운 것입니다.'],[''],
+    ['· 필수: 编号(품목코드), 数量 Total(총 수량) — Total이 비어 있으면 件数×Unit으로 계산합니다'],['· 工厂(공장)은 공급처로, 件数·毛重·净重·尺码는 박스수·중량·CBM으로 저장됩니다'],
+    ['· 같은 품목의 발주(생산중)가 있으면 그 수량에서 차감, 없거나 부족하면 선적대기로 새로 등록(업로드할 때 선택)'],['· 파일 이름의 날짜(20261003 등)가 생산완료일로 자동 입력됩니다'],['· TTL(합계) 줄은 자동으로 무시합니다']]);g['!cols']=[{wch:110}];XLSX.utils.book_append_sheet(wb,g,'작성방법');
+  XLSX.writeFile(wb,'grachen_template_ready_'+today().replace(/-/g,'')+'.xlsx');
 }
 /* ----- ERP 재고현황 형식 ----- */
 function parseErpStock(aoa){
@@ -1136,7 +1212,7 @@ function vXl(){
 Object.assign(App,{
   goXl(t){ui.xlType=t;ui.xlPrev=null;ui.tab='xl';window.scrollTo(0,0);render();},
   xlType(t){ui.xlType=t;ui.xlPrev=null;render();},
-  xlTemplate(){if(ui.xlType==='po')poTemplate();else if(ui.xlType==='stock')erpStockTemplate();else xlTemplate(ui.xlType);},
+  xlTemplate(){if(ui.xlType==='prod')plTemplate();else if(ui.xlType==='po')poTemplate();else if(ui.xlType==='stock')erpStockTemplate();else xlTemplate(ui.xlType);},
   xlExportAll,
   xlFile(input){const f=input.files[0];if(!f)return;input.value='';
     if(typeof XLSX==='undefined'){alert('엑셀 라이브러리를 불러오지 못했습니다.');return;}
@@ -1144,6 +1220,7 @@ Object.assign(App,{
       const sheets=wb.SheetNames.map(n=>XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}));
       if(ui.xlType==='po'){for(const a of sheets){const ps=parsePoSheet(a);if(ps){poHeaderModal(ps,f.name);return;}}}
       if(ui.xlType==='stock'){for(const a of sheets){const es=parseErpStock(a);if(es){erpStockModal(es,f.name);return;}}}
+      if(ui.xlType==='prod'){for(const a of sheets){const pl=parsePackingList(a);if(pl){plModal(pl,f.name);return;}}}
       xlPreview(ui.xlType,sheets[0],f.name);render();}catch(e){alert('파일을 읽지 못했습니다: '+e.message);}};rd.readAsArrayBuffer(f);},
   xlCommit(){const pv=ui.xlPrev;if(!pv||!pv.st)return;const n=pv.rows.filter(r=>r.status==='ok'||r.status==='warn').length;
     if(!confirm(XL[pv.type].label+' '+n+'건을 반영할까요?'))return;S=pv.st;ui.xlPrev=null;ui.sel.clear();save();render();toast(XL[pv.type].label+' '+n+'건 반영 완료');},
